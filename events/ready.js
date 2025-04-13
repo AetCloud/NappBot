@@ -9,11 +9,7 @@ module.exports = {
     console.log(`🌐 Serving ${client.guilds.cache.size} guilds`);
     console.log(
       `📋 Number of commands: ${client.commands ? client.commands.size : 0}`
-    );
-    if (!client.commands || client.commands.size === 0) {
-      console.warn("⚠️ No commands found. Skipping registration.");
-      return;
-    }
+    )
 
     if (process.env.DISABLE_READY_COMMANDS === "true") {
       console.log(
