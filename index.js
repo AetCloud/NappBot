@@ -160,7 +160,7 @@ async function postWalltakerImages() {
 
 process.on("beforeExit", (code) => {
   console.log(`⚠️ Process is about to exit with code: ${code}`);
-  clearInterestTimers();
+  clearInterestTimers(); // Clear the interest timers
 });
 
 process.on("unhandledRejection", (reason, promise) => {
