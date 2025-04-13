@@ -22,8 +22,7 @@ const { clearInterestTimers } = require("./utils/interest");
 
 require("./server");
 
-const TOKEN = process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
+const { TOKEN, CLIENT_ID } = require("./config");
 
 if (!TOKEN || !CLIENT_ID) {
   console.error("❌ Missing required environment variables!");
@@ -148,21 +147,14 @@ async function postWalltakerImages() {
   try {
     await database.query("SELECT 1");
     console.log("✅ Connected to MySQL!");
-    try {
-      await deployCommands();
-      console.log("✅ Command deployment completed successfully.");
-    } catch (deployError) {
-      console.error("❌ Command deployment failed:", deployError);
-    }
-  } catch (err) {
-    console.error("❌ Error:", err);
-  } finally {
-    try {
-      await client.login(TOKEN);
-      console.log("✅ Bot logged in successfully!");
-    } catch (loginError) {
-      console.error("❌ Error logging in:", loginError);
-    }
+
+    await deployCommands();
+    console.log("✅ Command deployment completed successfully.");
+
+    await client.login(TOKEN);
+    console.log("✅ Bot logged in successfully!");
+  } catch (error) {
+    console.error("❌ Error during initialization:", error);
   }
 })();
 

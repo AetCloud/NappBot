@@ -22,22 +22,17 @@ module.exports = {
         return interaction.editReply("⚠️ No commands available.");
       }
 
+      const capitalize = (str) => str.charAt(0).toUpperCase() + str.slice(1);
       const categories = {};
 
       commandList.forEach((cmd, cmdName) => {
-        const category = path
-          .dirname(cmd.filePath)
-          .split(path.sep)
-          .pop();
+        const category = capitalize(path.basename(path.dirname(cmd.filePath)));
 
-        const capitalizedCategory =
-          category.charAt(0).toUpperCase() + category.slice(1);
-
-        if (!categories[capitalizedCategory]) {
-          categories[capitalizedCategory] = [];
+        if (!categories[category]) {
+          categories[category] = [];
         }
 
-        categories[capitalizedCategory].push(
+        categories[category].push(
           `\`/${cmd.data.name}\` - ${cmd.data.description}`
         );
       });
