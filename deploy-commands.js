@@ -1,10 +1,9 @@
 const fs = require("fs");
 const path = require("path");
 const { REST, Routes } = require("discord.js");
-const { TOKEN, CLIENT_ID } = require("./config");
 
-const clientId = CLIENT_ID;
-const token = TOKEN;
+const clientId = process.env.CLIENT_ID;
+const token = process.env.TOKEN;
 
 if (!clientId || !token) {
   console.error("❌ Missing CLIENT_ID or TOKEN in environment variables.");
@@ -59,26 +58,28 @@ async function deployCommands() {
 
     console.log("🚨 Deleting old global commands...");
     console.time("DeleteOldCommands");
-    await rest.put(Routes.applicationCommands(clientId), { body: [] });
-    console.log("✅ Cleared old global commands!");
+    await rest.put(Routes.applicationCommands(clientId), { body: [] })
+      .catch(error => {
+        console.error("❌ Error deleting old global commands:", error);
+      });
     console.timeEnd("DeleteOldCommands");
+    console.log("✅ Cleared old global commands!");
 
     console.log(`🔄 Registering ${allCommands.length} global commands...`);
     console.time("RegisterCommands");
-    const result = await rest.put(Routes.applicationCommands(clientId), {
+    await rest.put(Routes.applicationCommands(clientId), {
       body: allCommands,
-    });
-    console.log(`✅ Successfully registered ${result.length} global commands.`);
+    })
+      .then(result => {
+        console.log("✅ Successfully registered global commands:", result);
+      })
+      .catch(error => {
+        console.error("❌ Error registering global commands:", error);
+      });
     console.timeEnd("RegisterCommands");
   } catch (error) {
     console.error("❌ Error deploying commands:", error);
   }
 }
-
-deployCommands().then(() => {
-  console.log("🚀 Deployment process completed.");
-}).catch(error => {
-  console.error("❌ Deployment process failed:", error);
-});
 
 module.exports = { deployCommands };
