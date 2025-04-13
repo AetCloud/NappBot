@@ -38,11 +38,39 @@ const client = new Client({
   ],
 });
 
+// Initialize commands collection
 client.commands = new Collection();
 
-const eventFiles = fs
-  .readdirSync("./events")
-  .filter((file) => file.endsWith(".js"));
+// Recursive command loader
+function loadCommands(dir) {
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      loadCommands(fullPath);
+    } else if (entry.name.endsWith(".js")) {
+      try {
+        const command = require(fullPath);
+        if ("data" in command && "execute" in command) {
+          client.commands.set(command.data.name, command);
+          console.log(`✅ Loaded command: ${command.data.name}`);
+        } else {
+          console.log(`⚠️ Skipping invalid command: ${fullPath}`);
+        }
+      } catch (error) {
+        console.error(`❌ Error loading command ${fullPath}:`, error);
+      }
+    }
+  }
+}
+
+console.log("📂 Loading commands...");
+loadCommands(path.join(__dirname, "commands"));
+console.log(`✅ Successfully loaded ${client.commands.size} commands`);
+
+const eventFiles = fs.readdirSync("./events")
+  .filter(file => file.endsWith(".js"));
 
 for (const file of eventFiles) {
   const event = require(`./events/${file}`);
@@ -76,9 +104,7 @@ async function postWalltakerImages() {
 
       const imageData = await fetchWalltakerImage(feed_id);
       if (!imageData) {
-        console.log(
-          `⚠️ No image found in Walltaker feed for guild ${guild_id}`
-        );
+        console.log(`⚠️ No image found in Walltaker feed for guild ${guild_id}`);
         continue;
       }
 
@@ -87,28 +113,20 @@ async function postWalltakerImages() {
 
       const lastPosted = await getLastPostedImage(guild_id);
       if (lastPosted === cleanImageUrl) {
-        console.log(
-          `✅ No new Walltaker image for guild ${guild_id}, skipping...`
-        );
+        console.log(`✅ No new Walltaker image for guild ${guild_id}, skipping...`);
         continue;
       }
 
-      console.log(
-        `🆕 New Walltaker image detected for guild ${guild_id}, sending now!`
-      );
+      console.log(`🆕 New Walltaker image detected for guild ${guild_id}, sending now!`);
       await saveLastPostedImage(guild_id, cleanImageUrl);
 
       const updatedByUser = lastUpdatedBy?.trim() || "anon";
       const e621PostId = await getE621PostId(cleanImageUrl);
-      const e621PostUrl = e621PostId
-        ? `https://e621.net/posts/${e621PostId}`
-        : null;
+      const e621PostUrl = e621PostId ? `https://e621.net/posts/${e621PostId}` : null;
 
       const embed = new EmbedBuilder()
         .setTitle(`🖼️ Walltaker Image for Feed ${feed_id}`)
-        .setDescription(
-          "🔄 **Automatic Detection** - A new image has been set!"
-        )
+        .setDescription("🔄 **Automatic Detection** - A new image has been set!")
         .setImage(cleanImageUrl)
         .setColor("#3498DB")
         .setFooter({
@@ -135,10 +153,7 @@ async function postWalltakerImages() {
       const row = new ActionRowBuilder().addComponents(...buttons);
       await channel.send({ embeds: [embed], components: [row] });
     } catch (error) {
-      console.error(
-        `❌ Error posting Walltaker image for guild ${guild_id}:`,
-        error
-      );
+      console.error(`❌ Error posting Walltaker image for guild ${guild_id}:`, error);
     }
   }
 }
