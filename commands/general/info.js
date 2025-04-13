@@ -6,7 +6,6 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const { getSystemMetrics } = require("../../utils/metrics.js");
-const { GITHUB_REPO_URL, SUPPORT_SERVER_URL } = require("../../config");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -78,11 +77,11 @@ module.exports = {
       new ButtonBuilder()
         .setLabel("GitHub Repository")
         .setStyle(ButtonStyle.Link)
-        .setURL(GITHUB_REPO_URL),
+        .setURL("https://github.com/AetCloud/NappBot"),
       new ButtonBuilder()
         .setLabel("Support Server")
         .setStyle(ButtonStyle.Link)
-        .setURL(SUPPORT_SERVER_URL)
+        .setURL("https://discord.gg/7xFAdhG7Tx")
     );
 
     await interaction.reply({
