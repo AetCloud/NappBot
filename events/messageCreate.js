@@ -6,13 +6,11 @@ const {
   Collection,
 } = require("discord.js");
 const { getMewbotConfig } = require("../utils/database"); // Adjust path if needed
-const fs = require("fs");
-const path = require("path");
+let pokemonDataMap = new Map(); // Store parsed data: { pokedexId: name }
 
-// --- Constants and Data Loading ---
+// --- Constants ---
 const COOLDOWN_SECONDS = 5; // 5 seconds cooldown
 const guessCooldowns = new Collection();
-const pokemonDataMap = new Map(); // Store parsed data: { pokedexId: name }
 
 const FORM_SUFFIX_MAP = {
   // 0: Standard (no suffix needed)
@@ -23,74 +21,70 @@ const FORM_SUFFIX_MAP = {
   // Add more mappings if Mewbot uses other numbers/suffixes
 };
 
-// --- Parse pokemonlist.txt ---
+// --- Load pokemonData.json ---
 try {
-  const filePath = path.join(__dirname, "..", "utils", "pokemonlist.txt"); // Adjust path if needed
-  const fileContent = fs.readFileSync(filePath, "utf8");
-  const lines = fileContent.split(/\r?\n/); // Split by newline, handle Windows/Unix endings
+  // Use require to load the JSON file directly
+  const pokemonList = require("../utils/pokemonData.json"); // Adjust path if needed
+
+  if (!Array.isArray(pokemonList)) {
+    throw new Error("pokemonData.json is not a valid JSON array.");
+  }
 
   console.log(
-    `[Pokemon Parser] Reading ${lines.length} lines from pokemonlist.txt`
+    `[Pokemon Loader] Reading ${pokemonList.length} entries from pokemonData.json`
   );
-
-  let parsedCount = 0;
-  for (const line of lines) {
-    if (!line.trim() || line.toLowerCase().startsWith("number")) {
-      // console.log(`[Pokemon Parser] Skipping line: ${line}`); // Skip header or empty lines
-      continue; // Skip header or empty lines
-    }
-
-    // Split by tab or multiple spaces
-    const parts = line.split(/\s+/);
-    if (parts.length >= 2) {
-      const numberStr = parts[0];
-      const name = parts.slice(1).join(" "); // Rejoin name parts if name has spaces (shouldn't based on file)
-
-      // Clean the number string (remove leading zeros)
-      const pokedexId = parseInt(numberStr, 10);
-
-      // Clean the name (remove symbols like ♀ ♂, convert to lowercase)
-      const cleanedName = name.replace(/[♀♂]/g, "").toLowerCase().trim();
-
-      if (!isNaN(pokedexId) && cleanedName) {
-        pokemonDataMap.set(pokedexId, cleanedName);
-        parsedCount++;
-        // console.log(`[Pokemon Parser] Parsed: ID=${pokedexId}, Name='${cleanedName}'`); // Debug log
-      } else {
-        console.warn(
-          `[Pokemon Parser] Failed to parse line: ${line} -> ID=${pokedexId}, Name='${cleanedName}'`
-        );
-      }
+  let loadedCount = 0;
+  for (const pokemon of pokemonList) {
+    // Only store the base form (form_id 0) in the map for base name lookup
+    if (
+      pokemon &&
+      typeof pokemon.id === "number" &&
+      typeof pokemon.form_id === "number" &&
+      pokemon.form_id === 0 &&
+      typeof pokemon.mewbot_name === "string"
+    ) {
+      // Use the ID from the JSON as the key and the name as the value
+      pokemonDataMap.set(pokemon.id, pokemon.mewbot_name.toLowerCase());
+      loadedCount++;
+    } else if (pokemon?.form_id !== 0) {
+      // Ignore non-base forms during map creation, they are handled dynamically later
     } else {
-      console.warn(`[Pokemon Parser] Skipping malformed line: ${line}`);
+      console.warn(
+        `[Pokemon Loader] Skipping invalid entry in pokemonData.json:`,
+        pokemon
+      );
     }
   }
   console.log(
-    `[Pokemon Parser] Successfully parsed ${parsedCount} Pokémon into map.`
+    `[Pokemon Loader] Successfully loaded ${loadedCount} base Pokémon names into map.`
   );
+
+  if (pokemonDataMap.size === 0) {
+    console.error(
+      "❌ CRITICAL: Pokemon map is empty after loading JSON. Ensure pokemonData.json is valid and contains base forms."
+    );
+  }
 } catch (err) {
   console.error(
-    "❌ CRITICAL: Failed to load or parse utils/pokemonlist.txt:",
+    "❌ CRITICAL: Failed to load or parse utils/pokemonData.json:",
     err
   );
-  // Bot might still run, but Mewbot helper will fail. Consider exiting if this is critical.
-  // process.exit(1);
+  // Bot might still run, but Mewbot helper will likely fail.
 }
 // -----------------------------
 
 // --- Helper Function to Parse Embed ---
 function parseMewbotEmbed(embed) {
-  // ... (Keep the parseMewbotEmbed function from the previous example - no changes needed here) ...
+  // ... (Keep the same parseMewbotEmbed function as before) ...
   let hint = null;
   let imageUrl = null;
 
   if (embed?.image?.url) {
     imageUrl = embed.image.url;
   } else {
-    return null; // No image, definitely not a catch embed
+    return null;
   }
 
-  // Look for hint in description
   if (embed.description) {
     const hintMatch = embed.description.match(
       /(?:The Pok.mon's name begins with|Pok.mon name:|This Pok.mon.s name begins with)\s*\n?([A-Za-z\s_]+)/i
@@ -103,7 +97,6 @@ function parseMewbotEmbed(embed) {
     }
   }
 
-  // Fallback: Check fields
   if (!hint && embed.fields?.length > 0) {
     for (const field of embed.fields) {
       if (!field.name || !field.value) continue;
@@ -134,7 +127,10 @@ module.exports = {
   async execute(message, client) {
     // --- Basic Checks & Config Fetch ---
     if (message.author.id === client.user.id || !message.guild) return;
-    if (pokemonDataMap.size === 0) return; // Don't run if Pokemon data failed to load
+    if (pokemonDataMap.size === 0) {
+      // console.warn("[Mewbot Helper] Pokemon data map is empty, skipping execution.");
+      return; // Don't run if Pokemon data failed to load
+    }
 
     const guildId = message.guild.id;
     let config;
@@ -149,7 +145,6 @@ module.exports = {
     }
 
     // --- Author Check & Feature Status ---
-    // Only proceed if feature is enabled AND message is from the configured Mewbot ID
     if (
       !config ||
       !config.enabled ||
@@ -186,7 +181,8 @@ module.exports = {
         parsedFormId = parseInt(urlMatch[2], 10);
       } catch (e) {
         console.error("[Mewbot Helper] Error parsing ID/Form:", e);
-      }
+        return;
+      } // Exit if parsing fails
     } else {
       console.warn(
         `[Mewbot Helper] Could not parse ID/Form from URL: ${imageUrl}`
@@ -198,30 +194,28 @@ module.exports = {
     const baseName = pokemonDataMap.get(parsedId);
     if (!baseName) {
       console.warn(
-        `[Mewbot Helper] No base name found for Pokedex ID: ${parsedId}`
+        `[Mewbot Helper] No base name found for Pokedex ID: ${parsedId} in pokemonDataMap.`
       );
       return; // Cannot proceed without base name
     }
 
-    const formSuffix = FORM_SUFFIX_MAP[parsedFormId] || ""; // Get suffix or empty string if form 0 or unknown
-    const expectedName = (baseName + formSuffix).toLowerCase(); // e.g., "rattata-alola"
+    const formSuffix = FORM_SUFFIX_MAP[parsedFormId] || "";
+    const expectedName = (baseName + formSuffix).toLowerCase();
 
     // --- Process Hint for Regex Matching ---
-    const processedHint = hint.replace(/\s+/g, ""); // Remove all spaces -> "Hi________"
+    const processedHint = hint.replace(/\s+/g, "");
     const hintLength = processedHint.length;
     if (hintLength === 0 || expectedName.length !== hintLength) {
-      // console.log(`[Mewbot Helper] Length mismatch: Hint='${processedHint}'(${hintLength}), Expected='${expectedName}'(${expectedName.length})`);
-      return; // Hint length must match expected name length
+      return; // Length mismatch
     }
 
-    // Create Regex from hint
     const hintRegexPattern =
       "^" +
       processedHint
         .split("")
         .map((char) => {
           if (char === "_") return ".";
-          return char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // Escape special chars
+          return char.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
         })
         .join("") +
       "$";
@@ -243,14 +237,31 @@ module.exports = {
 
     // --- Prepare and Send Response ---
     if (isMatch) {
+      // Cooldown check before sending success message
+      const cooldownKey = `${message.channel.id}-${parsedId}-${parsedFormId}`; // Cooldown per channel per specific pokemon spawn
+      const now = Date.now();
+      if (guessCooldowns.has(cooldownKey)) {
+        const expirationTime = guessCooldowns.get(cooldownKey);
+        if (now < expirationTime) {
+          // console.log(`[Mewbot Helper] Guess for ${expectedName} in ${message.channel.id} is on cooldown.`);
+          return; // Don't send if already guessed recently in this channel
+        }
+      }
+      // Set cooldown *after* confirming a match will be sent
+      guessCooldowns.set(cooldownKey, now + COOLDOWN_SECONDS * 1000);
+      setTimeout(
+        () => guessCooldowns.delete(cooldownKey),
+        COOLDOWN_SECONDS * 1000
+      );
+
       const suggestionEmbed = new EmbedBuilder()
-        .setColor("#77DD77") // Greenish color for success
+        .setColor("#77DD77")
         .setTitle("💡 Pokémon Guess!")
-        .setDescription(`Hint: \`${hint}\`\nExpected Name: **${expectedName}**`)
+        .setDescription(`Hint: \`${hint}\`\nMatch: **${expectedName}**`)
         .setFooter({ text: `Helper by ${client.user.username}` })
         .addFields({
           name: "Parsed Info",
-          value: `ID: \`${parsedId}\`, Form: \`${parsedFormId}\`, Base: \`${baseName}\``,
+          value: `ID: \`${parsedId}\`, Form: \`${parsedFormId}\``,
           inline: true,
         });
 
@@ -280,7 +291,6 @@ module.exports = {
         }
       }
 
-      // Prepare Action Row with Button if needed
       const row = new ActionRowBuilder();
       if (fetchedOutputChannel) {
         row.addComponents(
@@ -312,11 +322,10 @@ module.exports = {
                 `⚠️ Couldn't send Pokémon suggestion to ${outputChannel}. Check permissions?`
               );
             }
-          } catch {} // Ignore fallback error
+          } catch {}
         }
       }
-    } else {
-      console.log(`[Mewbot Helper] No match: Expected Name '${expectedName}' did not match hint pattern '${hintRegexPattern}'`);
     }
+    // No 'else' needed - if it's not a match, we just don't send anything.
   },
 };
