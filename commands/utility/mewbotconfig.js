@@ -1,5 +1,3 @@
-// NappBotNoModules/commands/utility/mewbotconfig.js
-
 const {
   SlashCommandBuilder,
   PermissionFlagsBits,

@@ -69,26 +69,6 @@ const deployCommands = async (client) => {
   }
 
   try {
-    // --- Clear Guild Commands ---
-    const guildIds = client.guilds.cache.map((guild) => guild.id);
-    console.log(`♻️ Clearing commands for ${guildIds.length} guild(s)...`);
-    for (const guildId of guildIds) {
-      try {
-        await rest.put(
-          Routes.applicationGuildCommands(clientId, guildId),
-          { body: [] } // Send empty array to clear
-        );
-        console.log(`✅ Cleared commands for GUILD ID: ${guildId}`);
-      } catch (err) {
-        console.error(
-          `❌ Failed to clear commands for GUILD ID: ${guildId}`,
-          err.message || err
-        );
-        // Continue to next guild even if one fails
-      }
-    }
-    console.log("✅ Finished clearing guild commands.");
-
     // --- Clear and Deploy Global Commands ---
     console.log("♻️ Clearing global commands...");
     await rest.put(
