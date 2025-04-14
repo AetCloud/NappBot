@@ -1,6 +1,10 @@
 const { EmbedBuilder } = require("discord.js");
 const cooldowns = new Map();
 
+// Global configuration
+const DEFAULT_COOLDOWN = 3; // Seconds
+const DEFER_THRESHOLD = 2000; // Defer replies for commands taking longer than 2 seconds
+
 module.exports = {
   name: "interactionCreate",
   async execute(interaction, client) {
@@ -14,20 +18,19 @@ module.exports = {
       });
     }
 
-    // Cooldown system
-    const cooldownKey = `${interaction.user.id}-${interaction.commandName}`;
-    const now = Date.now();
-    const cooldownTime = (command.cooldown || 3) * 1000;
+    // Global cooldown system
+    const cooldownKey = `${interaction.user.id}-${command.data.name}`;
+    const cooldownTime = (command.cooldown || DEFAULT_COOLDOWN) * 1000;
 
     if (cooldowns.has(cooldownKey)) {
-      const expiration = cooldowns.get(cooldownKey) + cooldownTime;
-      if (now < expiration) {
-        const timeLeft = ((expiration - now) / 1000).toFixed(1);
+      const expirationTime = cooldowns.get(cooldownKey) + cooldownTime;
+      if (Date.now() < expirationTime) {
+        const timeLeft = ((expirationTime - Date.now()) / 1000).toFixed(1);
         return interaction.reply({
           embeds: [
             new EmbedBuilder()
               .setDescription(
-                `⏳ Please wait ${timeLeft}s before reusing this command`
+                `⏳ Please wait ${timeLeft}s before using this command`
               )
               .setColor("#FFA500"),
           ],
@@ -37,34 +40,34 @@ module.exports = {
     }
 
     try {
-      // Defer reply for commands taking longer than 2 seconds
-      if (command.defer)
-        await interaction.deferReply({ ephemeral: command.ephemeral });
+      // Auto-defer long running commands
+      let deferred = false;
+      if (command.defer === undefined) {
+        // Only auto-defer if not explicitly set
+        const deferTimer = setTimeout(async () => {
+          await interaction.deferReply({ ephemeral: command.ephemeral });
+          deferred = true;
+        }, DEFER_THRESHOLD);
 
-      // Execute command
-      await command.execute(interaction, client);
-      cooldowns.set(cooldownKey, now);
+        await command.execute(interaction, client);
+        clearTimeout(deferTimer);
+      } else {
+        if (command.defer)
+          await interaction.deferReply({ ephemeral: command.ephemeral });
+        await command.execute(interaction, client);
+      }
+
+      // Update cooldown
+      cooldowns.set(cooldownKey, Date.now());
     } catch (error) {
-      console.error(`Command Error: /${interaction.commandName}`, {
-        User: interaction.user.tag,
-        Guild: interaction.guild?.name,
-        Error: error.stack,
-      });
-
-      const errorMessage =
-        process.env.NODE_ENV === "production"
-          ? "❌ Something went wrong. Please try again later."
-          : `🔧 Error: ${error.message}`;
+      console.error(`Command Error: /${interaction.commandName}`, error.stack);
 
       const errorEmbed = new EmbedBuilder()
-        .setDescription(errorMessage)
+        .setDescription("❌ An error occurred while processing this command")
         .setColor("#FF0000");
 
-      if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({
-          embeds: [errorEmbed],
-          components: [],
-        });
+      if (deferred || interaction.replied) {
+        await interaction.editReply({ embeds: [errorEmbed] });
       } else {
         await interaction.reply({
           embeds: [errorEmbed],

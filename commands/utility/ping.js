@@ -3,14 +3,15 @@ const { SlashCommandBuilder } = require("discord.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("🏓 Pings the bot and shows the latency."),
-  async execute(interaction) {
+    .setDescription("🏓 Check bot latency"),
+
+  async execute(interaction, client) {
+    const latency = Date.now() - interaction.createdTimestamp;
+    const apiLatency = Math.round(client.ws.ping);
+
     await interaction.reply({
-      content: `🏓 Pong! Latency: ${
-        Date.now() - interaction.createdTimestamp
-      }ms`,
+      content: `🏓 Pong! (${latency}ms) | API: ${apiLatency}ms`,
       ephemeral: true,
     });
   },
-  modulePath: __filename,
 };
