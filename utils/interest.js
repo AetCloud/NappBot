@@ -1,5 +1,8 @@
 const { database } = require("./database");
 
+// Global variable to hold the timeout ID for cancellation
+let interestTimeoutId = null;
+
 function getInterestRate(balance, isActive) {
   let baseRate;
 
@@ -10,91 +13,142 @@ function getInterestRate(balance, isActive) {
   else if (balance < 1000000) baseRate = 0.02; // 2% for < 1M
   else baseRate = 0.01; // 1% for 1M+
 
+  // Apply activity bonus
   if (isActive) baseRate += 0.01;
 
-  return baseRate;
+  // Ensure rate is not negative (though unlikely with current logic)
+  return Math.max(0, baseRate);
 }
 
 async function getActiveUsers() {
   try {
+    // Check users active within the last 24 hours
     const [rows] = await database.execute(
       "SELECT user_id FROM users WHERE active_last >= NOW() - INTERVAL 24 HOUR"
     );
     return new Set(rows.map((row) => row.user_id));
   } catch (error) {
     console.error("❌ MySQL Error (getActiveUsers):", error);
-    return new Set();
+    return new Set(); // Return empty set on error
   }
 }
 
-async function wasInterestAppliedRecently() {
+async function wasInterestAppliedRecently(checkIntervalMinutes = 59) {
+  // Checks if interest was applied within the last ~59 minutes
   try {
     const [rows] = await database.execute(
       "SELECT MAX(last_interest) AS last_applied FROM users"
     );
     const lastApplied = rows[0]?.last_applied;
-    if (!lastApplied) return false;
+    if (!lastApplied) return false; // No interest applied ever
 
     const lastTime = new Date(lastApplied).getTime();
-    const oneHourAgo = Date.now() - 60 * 60 * 1000;
+    const checkTimeAgo = Date.now() - checkIntervalMinutes * 60 * 1000;
 
-    return lastTime > oneHourAgo; 
+    // Return true if last application was within the check interval
+    return lastTime > checkTimeAgo;
   } catch (error) {
     console.error("❌ MySQL Error (wasInterestAppliedRecently):", error);
-    return false;
+    return false; // Assume not applied recently on error
   }
 }
 
-async function applyInterest() {
+async function applyInterestAndReschedule() {
+  console.log("⏰ Interest application cycle started.");
   try {
-    if (await wasInterestAppliedRecently()) {
-      console.log("⏳ Interest already applied recently. Skipping...");
-      return;
+    // Safety check: Only apply if not applied very recently (e.g., within last 59 mins)
+    if (await wasInterestAppliedRecently(59)) {
+      console.log(
+        "⏳ Interest already applied recently. Skipping application cycle."
+      );
+    } else {
+      console.log("🔄 Applying scheduled interest...");
+      const activeUsers = await getActiveUsers();
+      const [users] = await database.execute(
+        "SELECT user_id, bank_balance FROM users WHERE bank_balance > 0"
+      );
+
+      let affectedUsers = 0;
+      const promises = users.map(async ({ user_id, bank_balance }) => {
+        // Ensure bank_balance is a positive number
+        const currentBalance = Number(bank_balance);
+        if (isNaN(currentBalance) || currentBalance <= 0) {
+          return; // Skip if balance is invalid or zero
+        }
+
+        const isActive = activeUsers.has(user_id);
+        const interestRate = getInterestRate(currentBalance, isActive);
+        const interest = Math.floor(currentBalance * interestRate);
+
+        if (interest > 0) {
+          try {
+            // Update balance and the last_interest timestamp atomically
+            await database.execute(
+              "UPDATE users SET bank_balance = bank_balance + ?, last_interest = NOW() WHERE user_id = ?",
+              [interest, user_id]
+            );
+            affectedUsers++;
+            // Optional: Reduce logging noise unless debugging
+            // console.log(`💰 Applied ${interest} coins to ${user_id} (Active: ${isActive})`);
+          } catch (updateError) {
+            console.error(
+              `❌ Failed to update interest for user ${user_id}:`,
+              updateError
+            );
+          }
+        }
+      });
+
+      await Promise.all(promises); // Wait for all updates to process
+
+      console.log(
+        `✅ Interest application finished. Affected users: ${affectedUsers}.`
+      );
     }
-
-    const activeUsers = await getActiveUsers();
-    const [users] = await database.execute(
-      "SELECT user_id, bank_balance FROM users WHERE bank_balance > 0"
-    );
-
-    let affectedUsers = 0;
-    for (const { user_id, bank_balance } of users) {
-      const isActive = activeUsers.has(user_id);
-      const interestRate = getInterestRate(bank_balance, isActive);
-      const interest = Math.floor(bank_balance * interestRate);
-
-      if (interest > 0) {
-        await database.execute(
-          "UPDATE users SET bank_balance = bank_balance + ?, last_interest = NOW() WHERE user_id = ?",
-          [interest, user_id]
-        );
-        affectedUsers++;
-        console.log(
-          `💰 Applied ${interest} coins to ${user_id} (Active: ${isActive})`
-        );
-      }
-    }
-
-    console.log(`✅ Interest applied to ${affectedUsers} users.`);
   } catch (error) {
-    console.error("❌ MySQL Error (applyInterest):", error);
+    console.error("❌ Error during applyInterest function:", error);
+  } finally {
+    // ALWAYS reschedule, even if the current run skipped or failed
+    scheduleNextInterestApplication();
+    console.log("🗓️ Next interest application scheduled.");
   }
 }
 
-let initialTimeout;
-const hourlyInterval = setInterval(applyInterest, 60 * 60 * 1000);
-
-initialTimeout = setTimeout(async () => {
-  if (!(await wasInterestAppliedRecently())) {
-    await applyInterest();
+function scheduleNextInterestApplication() {
+  // Clear any existing timeout to prevent duplicates if called manually
+  if (interestTimeoutId) {
+    clearTimeout(interestTimeoutId);
+    interestTimeoutId = null;
   }
-}, 5000);
+
+  const now = new Date();
+  const nextHour = new Date(now);
+  nextHour.setHours(now.getHours() + 1, 0, 0, 0); // Set to the beginning of the next hour
+
+  const delay = nextHour.getTime() - now.getTime(); // Milliseconds until the next hour starts
+
+  console.log(
+    `🕰️ Scheduling next interest check in ${Math.round(
+      delay / 60000
+    )} minutes (at ${nextHour.toLocaleTimeString()}).`
+  );
+
+  // Set the timeout to run the combined function
+  interestTimeoutId = setTimeout(applyInterestAndReschedule, delay);
+}
+
+// Function to clear the timeout during shutdown
+function clearInterestTimers() {
+  if (interestTimeoutId) {
+    clearTimeout(interestTimeoutId);
+    interestTimeoutId = null;
+    console.log("🛑 Cleared scheduled interest timer.");
+  }
+}
 
 module.exports = {
-  applyInterest,
-  clearInterestTimers: () => {
-    clearInterval(hourlyInterval);
-    clearTimeout(initialTimeout);
-    console.log("🛑 Cleared interest timers.");
-  },
+  // Expose only the functions needed externally
+  scheduleNextInterestApplication, // To start the process from ready.js
+  clearInterestTimers, // To stop the process on shutdown
+  applyInterest: applyInterestAndReschedule, // Keep applyInterest if commands need to trigger it manually (optional)
 };
