@@ -1,4 +1,5 @@
 require("dotenv").config();
+const { fs } = require('fs');
 const { Client, Collection, GatewayIntentBits } = require("discord.js");
 const { database } = require("./utils/database");
 const { deployCommands } = require("./deploy-commands");
