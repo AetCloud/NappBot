@@ -5,6 +5,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("cmds")
     .setDescription("📜 View a list of all available commands."),
+  defer: true,
 
   async execute(interaction) {
     console.log(
@@ -25,10 +26,7 @@ module.exports = {
       const categories = {};
 
       commandList.forEach((cmd, cmdName) => {
-        const category = path
-          .dirname(cmd.filePath)
-          .split(path.sep)
-          .pop();
+        const category = path.dirname(cmd.filePath).split(path.sep).pop();
 
         const capitalizedCategory =
           category.charAt(0).toUpperCase() + category.slice(1);
