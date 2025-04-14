@@ -3,32 +3,64 @@ const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
 const querystring = require("querystring");
+const crypto = require("crypto");
 const { storeUserInstallation } = require("./utils/database");
 
 const app = express();
-
 app.disable("x-powered-by");
 
+// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.CORS_ORIGIN || "*",
+    methods: ["GET", "POST"],
+  })
+);
 
-app.get("/", (req, res) => res.send("Bot is alive!"));
+// Security middleware
+app.use((req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  next();
+});
 
+// Health check endpoint
+app.get("/", (req, res) => {
+  res.status(200).json({
+    status: "ok",
+    timestamp: new Date().toISOString(),
+    version: process.env.npm_package_version,
+  });
+});
+
+// OAuth2 Configuration
+const DISCORD_API = "https://discord.com/api";
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const REDIRECT_URI =
   process.env.REDIRECT_URI ||
   "https://web-production-c3a9.up.railway.app/oauth/callback";
-const DISCORD_API = "https://discord.com/api";
 
-app.get("/oauth/callback", async (req, res) => {
-  const code = req.query.code;
-  if (!code) {
-    return res.status(400).send("❌ No code provided.");
+// Token hashing function
+const hashToken = (token) => {
+  if (!process.env.HMAC_SECRET) {
+    throw new Error("HMAC_SECRET environment variable is not set");
   }
+  return crypto
+    .createHmac("sha256", process.env.HMAC_SECRET)
+    .update(token)
+    .digest("hex");
+};
 
+// OAuth callback handler
+app.get("/oauth/callback", async (req, res) => {
   try {
+    const { code } = req.query;
+    if (!code) return res.status(400).send("Authorization code required");
+
+    // Exchange code for tokens
     const tokenResponse = await axios.post(
       `${DISCORD_API}/oauth2/token`,
       querystring.stringify({
@@ -44,47 +76,53 @@ app.get("/oauth/callback", async (req, res) => {
 
     const { access_token, refresh_token } = tokenResponse.data;
 
+    // Get user details
     const userResponse = await axios.get(`${DISCORD_API}/users/@me`, {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
-    console.log("Discord user response:", userResponse.data);
+    const { id: userId, username } = userResponse.data;
 
-    const userId = userResponse.data.id;
-    console.log("Retrieved userId:", userId);
-    const username = userResponse.data.username;
+    // Store hashed tokens
+    const storageSuccess = await storeUserInstallation(
+      userId,
+      hashToken(access_token),
+      hashToken(refresh_token)
+    );
 
-    console.log("Retrieved userId:", userId);
-    console.log("Type of userId:", typeof userId);
-
-    if (!userId) {
-      console.error("User ID is missing from Discord response!");
-      return res.status(500).send("❌ Authentication failed. User ID missing.");
+    if (!storageSuccess) {
+      throw new Error("Failed to store user installation data");
     }
 
-    const success = await storeUserInstallation(
-      userId,
-      access_token,
-      refresh_token
-    );
-    if (!success)
-      throw new Error("❌ Failed to store user data in the database.");
-
-    res.send(
-      `✅ Welcome, ${username}! You have successfully authorized NappBot.`
+    res.status(200).send(
+      `✅ Welcome ${username}! You've successfully authorized NappBot.<br>
+      You can safely close this window.`
     );
   } catch (error) {
-    console.error("❌ OAuth2 Error:", error.response?.data || error.message);
-    res.status(500).send("❌ Authentication failed.");
+    console.error("OAuth Error:", error.response?.data || error.message);
+    const errorMessage =
+      process.env.NODE_ENV === "production"
+        ? "❌ Authentication failed. Please try again later."
+        : `🔧 Error: ${error.message}`;
+
+    res.status(500).send(errorMessage);
   }
 });
 
+// Server configuration
 const port = process.env.PORT || 3000;
-app
-  .listen(port, () => console.log(`✅ Web server running on port ${port}`))
-  .on("error", (err) => {
-    console.error("❌ Failed to start server:", err.message);
-    process.exit(1);
-  });
+const server = app.listen(port, "0.0.0.0", () => {
+  console.log(`🌐 Server running on port ${port}`);
+});
 
-module.exports = app;
+// Graceful shutdown
+const shutdown = async () => {
+  console.log("🛑 Shutting down server...");
+  server.close(() => {
+    console.log("✅ Server closed");
+    process.exit(0);
+  });
+};
+
+process.on("SIGINT", shutdown);
+process.on("SIGTERM", shutdown);

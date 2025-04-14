@@ -1,85 +1,66 @@
+const { REST, Routes } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
-const { REST, Routes } = require("discord.js");
 
-const clientId = process.env.CLIENT_ID;
-const token = process.env.TOKEN;
+const validateCommand = (command) => {
+  if (!command.data) throw new Error("Missing data property");
+  if (!command.execute) throw new Error("Missing execute function");
+  if (typeof command.execute !== "function")
+    throw new Error("Execute must be a function");
+};
 
-if (!clientId || !token) {
-  console.error("❌ Missing CLIENT_ID or TOKEN in environment variables.");
-  process.exit(1);
-}
-
-console.log(`🔑 CLIENT_ID: ${clientId}`);
-console.log(`🔑 TOKEN: ${token ? "Provided" : "Not Provided"}`);
-console.log(`🛠️ Deploying commands globally...`);
-
-function getCommandFiles(dir) {
-  let files = [];
-  fs.readdirSync(dir, { withFileTypes: true }).forEach((entry) => {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files = files.concat(getCommandFiles(fullPath));
-    } else if (entry.name.endsWith(".js")) {
-      files.push(fullPath);
+const loadCommands = (dir) => {
+  return fs.readdirSync(dir).reduce((acc, entry) => {
+    const fullPath = path.join(dir, entry);
+    if (fs.statSync(fullPath).isDirectory()) {
+      return acc.concat(loadCommands(fullPath));
     }
-  });
-  return files;
-}
+    return entry.endsWith(".js") ? acc.concat(fullPath) : acc;
+  }, []);
+};
 
-const commandFiles = getCommandFiles(path.join(__dirname, "commands"));
+const deployCommands = async () => {
+  const token = process.env.TOKEN;
+  const clientId = process.env.CLIENT_ID;
 
-console.log(`📂 Found ${commandFiles.length} command files.`);
-
-const allCommands = [];
-
-for (const file of commandFiles) {
-  try {
-    const command = require(file);
-    if (command?.data?.toJSON) {
-      allCommands.push(command.data.toJSON());
-      console.log(`✅ Loaded command: ${command.data.name}`);
-    } else {
-      console.warn(`⚠️ Skipping invalid command file: ${file}`);
-    }
-  } catch (error) {
-    console.error(`❌ Error loading command file: ${file}`, error);
+  if (!token || !clientId) {
+    throw new Error("Missing required environment variables");
   }
-}
 
-const rest = new REST({ version: "10" }).setToken(token);
+  const rest = new REST({ version: "10" }).setToken(token);
+  const commandFiles = loadCommands(path.join(__dirname, "commands"));
+  const commands = [];
 
-async function deployCommands() {
-  try {
-    if (allCommands.length === 0) {
-      console.warn("⚠️ No commands found to register. Skipping deployment...");
-      return;
+  for (const file of commandFiles) {
+    try {
+      const command = require(file);
+      validateCommand(command);
+      commands.push(command.data.toJSON());
+      console.log(`✅ Validated command: ${command.data.name}`);
+    } catch (error) {
+      console.error(`❌ Invalid command in ${file}:`, error.message);
     }
-
-    console.log("🚨 Deleting old global commands...");
-    console.time("DeleteOldCommands");
-    await rest.put(Routes.applicationCommands(clientId), { body: [] })
-      .catch(error => {
-        console.error("❌ Error deleting old global commands:", error);
-      });
-    console.timeEnd("DeleteOldCommands");
-    console.log("✅ Cleared old global commands!");
-
-    console.log(`🔄 Registering ${allCommands.length} global commands...`);
-    console.time("RegisterCommands");
-    await rest.put(Routes.applicationCommands(clientId), {
-      body: allCommands,
-    })
-      .then(result => {
-        console.log("✅ Successfully registered global commands:", result);
-      })
-      .catch(error => {
-        console.error("❌ Error registering global commands:", error);
-      });
-    console.timeEnd("RegisterCommands");
-  } catch (error) {
-    console.error("❌ Error deploying commands:", error);
   }
-}
+
+  if (commands.length === 0) {
+    throw new Error("No valid commands found for deployment");
+  }
+
+  try {
+    console.log("♻️  Resetting global commands...");
+    await rest.put(Routes.applicationCommands(clientId), { body: [] });
+
+    console.log(`🚀 Deploying ${commands.length} commands...`);
+    const data = await rest.put(Routes.applicationCommands(clientId), {
+      body: commands,
+    });
+
+    console.log(`🎉 Successfully deployed ${data.length} commands`);
+    return data;
+  } catch (error) {
+    console.error("❌ Deployment failed:");
+    throw error;
+  }
+};
 
 module.exports = { deployCommands };
