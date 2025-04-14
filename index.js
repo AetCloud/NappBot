@@ -42,8 +42,7 @@ const loadCommandsRecursive = (dir) => {
         if (command.data && command.execute) {
           // Add filePath for the /cmds command categorization (if needed)
           command.filePath = fullPath;
-          client.commands.set(command.data.name, command);
-          // console.log(`✅ Loaded command: ${command.data.name}`); // Logged in deploy-commands now
+          client.commands.set(command.data.name, command); // console.log(`✅ Loaded command: ${command.data.name}`); // Logged in deploy-commands now
         } else {
           console.warn(
             `⚠️ Command file ${entry.name} is missing data or execute.`
@@ -96,29 +95,19 @@ const startBot = async () => {
   loadEvents(); // Load events
 
   try {
-    await initializeDatabase();
+    await initializeDatabase(); // Login to Discord
 
-    // Login to Discord
-    await client.login(process.env.TOKEN);
-    // Note: The 'ready' event handles the "Logged in as" message and subsequent initializations now
+    await client.login(process.env.TOKEN); // --- Deployment Trigger ---
 
-    // --- Deployment Trigger ---
-    // Run deployment only AFTER client is logged in and ready (or soon after)
-    // and only if the environment variable is set.
-    if (process.env.DEPLOY_COMMANDS === "true") {
-      // Wait briefly for caches to potentially populate, or rely on ready event if needed
-      // await new Promise(resolve => setTimeout(resolve, 2000)); // Optional small delay
-      console.log("🚀 Triggering command deployment...");
-      // Pass the logged-in client to deployCommands
-      await deployCommands(client);
-      console.log("✅ Command deployment process finished.");
-      // Optional: Exit after deployment if this is meant to be run only for deployment
-      // process.exit(0);
-    }
-    // --------------------------
-
-    // Initialize background services (Consider moving to 'ready' event if they depend on full cache)
-    // await initializeWalltaker(client); // Walltaker init moved to ready event in previous step
+    client.once("ready", async () => {
+      console.log(`✅ Logged in as ${client.user.tag}`); // Run deployment only AFTER client is logged in and ready
+      if (process.env.DEPLOY_COMMANDS === "true") {
+        console.log("🚀 Triggering command deployment..."); // Pass the logged-in client to deployCommands
+        await deployCommands(client);
+        console.log("✅ Command deployment process finished."); // Optional: Exit after deployment if this is meant to be run only for deployment // process.exit(0);
+      }
+      await initializeWalltaker(client);
+    }); // -------------------------- // Initialize background services (Consider moving to 'ready' event if they depend on full cache) // await initializeWalltaker(client); // Walltaker init moved to ready event
   } catch (error) {
     console.error("❌ Bot initialization or login failed:", error);
     process.exit(1);
@@ -143,8 +132,7 @@ const handleProcessEvents = () => {
       // Check if client exists and is logged in
       client.destroy(); // Gracefully disconnect the client
       console.log("🔌 Discord client connection closed.");
-    }
-    // Exit after cleanup
+    } // Exit after cleanup
     process.exit(signal === "uncaughtException" ? 1 : 0);
   };
 
@@ -152,8 +140,7 @@ const handleProcessEvents = () => {
   process.on("SIGTERM", () => cleanup("SIGTERM"));
 
   process.on("unhandledRejection", (error) => {
-    console.error("❌ Unhandled Promise Rejection:", error);
-    // Decide if you want to exit or just log
+    console.error("❌ Unhandled Promise Rejection:", error); // Decide if you want to exit or just log
   });
 
   process.on("uncaughtException", (error) => {
