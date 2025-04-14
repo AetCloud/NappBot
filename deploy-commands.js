@@ -1,65 +1,110 @@
-const { REST, Routes } = require("discord.js");
+const { REST, Routes, Collection } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 
-const validateCommand = (command) => {
-  if (!command.data) throw new Error("Missing data property");
-  if (!command.execute) throw new Error("Missing execute function");
-  if (typeof command.execute !== "function")
-    throw new Error("Execute must be a function");
-};
-
+// --- Helper: Load Commands ---
+// (Slightly modified to return the commands array directly and log loading)
 const loadCommands = (dir) => {
-  return fs.readdirSync(dir).reduce((acc, entry) => {
-    const fullPath = path.join(dir, entry);
-    if (fs.statSync(fullPath).isDirectory()) {
-      return acc.concat(loadCommands(fullPath));
+  let commands = [];
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      commands = commands.concat(loadCommands(fullPath)); // Recursively load from subdirectories
+    } else if (entry.isFile() && entry.name.endsWith(".js")) {
+      try {
+        const command = require(fullPath);
+        // Basic validation
+        if (command.data && command.execute) {
+          commands.push(command); // Store the whole command object temporarily
+          console.log(`✅ Loaded command file: ${entry.name}`);
+        } else {
+          console.warn(
+            `⚠️ Command file ${entry.name} is missing data or execute property.`
+          );
+        }
+      } catch (error) {
+        console.error(`❌ Failed to load command from ${entry.name}:`, error);
+      }
     }
-    return entry.endsWith(".js") ? acc.concat(fullPath) : acc;
-  }, []);
+  }
+  return commands;
 };
 
-const deployCommands = async () => {
+// --- Main Deployment Function ---
+const deployCommands = async (client) => {
+  // Accept client as argument
   const token = process.env.TOKEN;
   const clientId = process.env.CLIENT_ID;
 
   if (!token || !clientId) {
-    throw new Error("Missing required environment variables");
+    console.error(
+      "❌ Missing TOKEN or CLIENT_ID environment variables for deployment."
+    );
+    return; // Exit if essential variables are missing
+  }
+  if (!client || !client.isReady()) {
+    console.error(
+      "❌ Discord client is not provided or not ready for deployment."
+    );
+    // Optionally, you could proceed with only global deployment if client isn't needed/available
+    // but clearing guild commands requires the client.
+    return;
   }
 
   const rest = new REST({ version: "10" }).setToken(token);
-  const commandFiles = loadCommands(path.join(__dirname, "commands"));
-  const commands = [];
 
-  for (const file of commandFiles) {
-    try {
-      const command = require(file);
-      validateCommand(command);
-      commands.push(command.data.toJSON());
-      console.log(`✅ Validated command: ${command.data.name}`);
-    } catch (error) {
-      console.error(`❌ Invalid command in ${file}:`, error.message);
-    }
-  }
+  // --- Load Command Definitions ---
+  const loadedCommands = loadCommands(path.join(__dirname, "commands"));
+  const commandData = loadedCommands.map((cmd) => cmd.data.toJSON()); // Get JSON data for API
 
-  if (commands.length === 0) {
-    throw new Error("No valid commands found for deployment");
+  if (commandData.length === 0) {
+    console.warn("⚠️ No valid command files found to deploy.");
+    // Decide if you still want to clear commands or just exit
+  } else {
+    console.log(
+      `ℹ️ Found ${commandData.length} command definitions to deploy.`
+    );
   }
 
   try {
-    console.log("♻️  Resetting global commands...");
-    await rest.put(Routes.applicationCommands(clientId), { body: [] });
+    // --- Clear Guild Commands ---
+    const guildIds = client.guilds.cache.map((guild) => guild.id);
+    console.log(`♻️ Clearing commands for ${guildIds.length} guild(s)...`);
+    for (const guildId of guildIds) {
+      try {
+        await rest.put(
+          Routes.applicationGuildCommands(clientId, guildId),
+          { body: [] } // Send empty array to clear
+        );
+        console.log(`✅ Cleared commands for GUILD ID: ${guildId}`);
+      } catch (err) {
+        console.error(
+          `❌ Failed to clear commands for GUILD ID: ${guildId}`,
+          err.message || err
+        );
+        // Continue to next guild even if one fails
+      }
+    }
+    console.log("✅ Finished clearing guild commands.");
 
-    console.log(`🚀 Deploying ${commands.length} commands...`);
-    const data = await rest.put(Routes.applicationCommands(clientId), {
-      body: commands,
-    });
+    // --- Clear and Deploy Global Commands ---
+    console.log("♻️ Clearing global commands...");
+    await rest.put(
+      Routes.applicationCommands(clientId),
+      { body: [] } // Clear global commands
+    );
+    console.log("✅ Global commands cleared.");
 
-    console.log(`🎉 Successfully deployed ${data.length} commands`);
-    return data;
+    console.log(`🚀 Deploying ${commandData.length} global commands...`);
+    const data = await rest.put(
+      Routes.applicationCommands(clientId),
+      { body: commandData } // Deploy current commands
+    );
+    console.log(`🎉 Successfully deployed ${data.length} global commands.`);
   } catch (error) {
-    console.error("❌ Deployment failed:");
-    throw error;
+    console.error("❌ Deployment process failed:", error);
   }
 };
 

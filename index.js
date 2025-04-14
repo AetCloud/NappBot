@@ -1,12 +1,12 @@
 require("dotenv").config();
-const fs = require("fs"); // Moved require statements to the top for clarity
-const path = require("path"); // Added path require for command loading logic below
+const fs = require("fs");
+const path = require("path");
 const { Client, Collection, GatewayIntentBits } = require("discord.js");
 const { database } = require("./utils/database");
-const { deployCommands } = require("./deploy-commands");
+const { deployCommands } = require("./deploy-commands"); // Import deployCommands
 const { initializeWalltaker } = require("./utils/walltakerManager");
-const { clearInterestTimers } = require("./utils/interest");
-require("./server");
+const { clearInterestTimers } = require("./utils/interest"); // Ensure this import is correct
+require("./server"); // Assuming this starts your Express server
 
 // Environment Validation
 const validateEnvironment = () => {
@@ -20,16 +20,16 @@ const validateEnvironment = () => {
 
 const client = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
+    GatewayIntentBits.Guilds, // Essential for getting guild list on startup
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMembers, // Might be needed depending on command usage
     GatewayIntentBits.MessageContent,
   ],
 });
 
 client.commands = new Collection();
 
-// Command Loader Function (assuming it adds filePath)
+// Command Loader Function (ensure this adds filePath if /cmds relies on it)
 const loadCommandsRecursive = (dir) => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   for (const entry of entries) {
@@ -40,10 +40,10 @@ const loadCommandsRecursive = (dir) => {
       try {
         const command = require(fullPath);
         if (command.data && command.execute) {
-          // Add filePath for the /cmds command categorization
+          // Add filePath for the /cmds command categorization (if needed)
           command.filePath = fullPath;
           client.commands.set(command.data.name, command);
-          console.log(`✅ Loaded command: ${command.data.name}`);
+          // console.log(`✅ Loaded command: ${command.data.name}`); // Logged in deploy-commands now
         } else {
           console.warn(
             `⚠️ Command file ${entry.name} is missing data or execute.`
@@ -64,20 +64,16 @@ const loadEvents = () => {
 
   eventFiles.forEach((file) => {
     const event = require(`./events/${file}`);
-    const eventName = file.split(".")[0]; // Use event.name for clarity
+    const eventName = event.name || file.split(".")[0]; // Use event.name if available
 
     try {
-      // Pass 'client' to the event execute function if needed
-      const executor = (...args) => event.execute(...args, client);
+      const executor = (...args) => event.execute(...args, client); // Pass client
       event.once
-        ? client.once(event.name, executor)
-        : client.on(event.name, executor);
-      console.log(`✅ Loaded event: ${event.name}`); // Log using event.name
+        ? client.once(eventName, executor)
+        : client.on(eventName, executor);
+      console.log(`✅ Loaded event: ${eventName}`);
     } catch (error) {
-      console.error(
-        `❌ Failed to load event ${event.name || eventName}:`,
-        error
-      );
+      console.error(`❌ Failed to load event ${eventName}:`, error);
     }
   });
 };
@@ -89,72 +85,80 @@ const initializeDatabase = async () => {
     console.log("✅ Database connection verified");
   } catch (error) {
     console.error("❌ Database connection failed:", error);
-    process.exit(1);
+    process.exit(1); // Exit if DB connection fails
   }
 };
 
 // Bot Startup Sequence
 const startBot = async () => {
   validateEnvironment();
-  loadCommandsRecursive(path.join(__dirname, "commands")); // Load commands
+  loadCommandsRecursive(path.join(__dirname, "commands")); // Load commands into client.commands first
   loadEvents(); // Load events
 
   try {
     await initializeDatabase();
 
-    if (process.env.DEPLOY_COMMANDS === "true") {
-      console.log("🚀 Starting command deployment...");
-      await deployCommands(client.commands); // Pass commands if needed by deploy script
-    }
-
+    // Login to Discord
     await client.login(process.env.TOKEN);
-    // Ready event now handles the log message upon successful login
+    // Note: The 'ready' event handles the "Logged in as" message and subsequent initializations now
 
-    // Initialize background services
-    // Ensure Walltaker initialization doesn't rely on client being fully ready if it needs cache access
-    // It might be better to move this into the ready event if it depends on caches
-    await initializeWalltaker(client);
+    // --- Deployment Trigger ---
+    // Run deployment only AFTER client is logged in and ready (or soon after)
+    // and only if the environment variable is set.
+    if (process.env.DEPLOY_COMMANDS === "true") {
+      // Wait briefly for caches to potentially populate, or rely on ready event if needed
+      // await new Promise(resolve => setTimeout(resolve, 2000)); // Optional small delay
+      console.log("🚀 Triggering command deployment...");
+      // Pass the logged-in client to deployCommands
+      await deployCommands(client);
+      console.log("✅ Command deployment process finished.");
+      // Optional: Exit after deployment if this is meant to be run only for deployment
+      // process.exit(0);
+    }
+    // --------------------------
+
+    // Initialize background services (Consider moving to 'ready' event if they depend on full cache)
+    // await initializeWalltaker(client); // Walltaker init moved to ready event in previous step
   } catch (error) {
-    console.error("❌ Bot initialization failed:", error);
+    console.error("❌ Bot initialization or login failed:", error);
     process.exit(1);
   }
 };
 
-// Process Lifecycle Management
+// Process Lifecycle Management (Graceful Shutdown)
 const handleProcessEvents = () => {
-  process.on("beforeExit", async () => {
-    console.log("🛑 Cleaning up resources...");
-    clearInterestTimers(); // Ensure this function exists and is correctly imported
-    try {
-      await database.end();
-      console.log("✅ Database connection closed");
-    } catch (error) {
-      console.error("❌ Failed to close database:", error);
+  const cleanup = async (signal) => {
+    console.log(`\n🛑 Received ${signal}. Cleaning up resources...`);
+    clearInterestTimers(); // Clear interest timers
+    if (database) {
+      // Check if database pool exists
+      try {
+        await database.end();
+        console.log("✅ Database connection pool closed");
+      } catch (error) {
+        console.error("❌ Failed to close database pool:", error);
+      }
     }
-    client.destroy(); // Gracefully disconnect the client
-    console.log("🔌 Discord client connection closed.");
-  });
+    if (client && client.isReady()) {
+      // Check if client exists and is logged in
+      client.destroy(); // Gracefully disconnect the client
+      console.log("🔌 Discord client connection closed.");
+    }
+    // Exit after cleanup
+    process.exit(signal === "uncaughtException" ? 1 : 0);
+  };
 
-  process.on("SIGINT", async () => {
-    console.log("Received SIGINT. Shutting down gracefully...");
-    await process.emit("beforeExit"); // Trigger cleanup
-    process.exit(0);
-  });
-
-  process.on("SIGTERM", async () => {
-    console.log("Received SIGTERM. Shutting down gracefully...");
-    await process.emit("beforeExit"); // Trigger cleanup
-    process.exit(0);
-  });
+  process.on("SIGINT", () => cleanup("SIGINT"));
+  process.on("SIGTERM", () => cleanup("SIGTERM"));
 
   process.on("unhandledRejection", (error) => {
     console.error("❌ Unhandled Promise Rejection:", error);
-    // Consider whether to exit or just log depending on severity
+    // Decide if you want to exit or just log
   });
 
   process.on("uncaughtException", (error) => {
     console.error("❌ Uncaught Exception:", error);
-    process.exit(1); // Exit on uncaught exceptions to prevent undefined state
+    cleanup("uncaughtException"); // Trigger cleanup and exit
   });
 };
 
