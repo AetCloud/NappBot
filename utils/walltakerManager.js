@@ -8,12 +8,10 @@ const {
   ButtonStyle,
 } = require("discord.js");
 
-// Configuration
-const CHECK_INTERVAL = process.env.WALLTAKER_CHECK_INTERVAL || 5 * 60 * 1000; // 5 minutes
+const CHECK_INTERVAL = process.env.WALLTAKER_CHECK_INTERVAL || 5 * 60 * 1000;
 const DEFAULT_FOOTER_ICON =
   "https://cdn-icons-png.flaticon.com/512/1828/1828490.png";
 
-// Database Queries
 const WALLTAKER_SETTINGS_QUERY =
   "SELECT guild_id, feed_id, channel_id FROM walltaker_settings;";
 const LAST_POSTED_QUERY =
@@ -74,14 +72,12 @@ async function processGuildFeed(client, { guild_id, feed_id, channel_id }) {
     const { imageUrl, sourceUrl, lastUpdatedBy } = imageData;
     const cleanImageUrl = imageUrl?.trim() || null;
 
-    // Check for duplicates
     const lastPosted = await getLastPostedImage(guild_id);
     if (lastPosted === cleanImageUrl) {
       console.log(`✅ No new image for guild ${guild_id}`);
       return;
     }
 
-    // Prepare embed
     const embed = new EmbedBuilder()
       .setTitle(`🖼️ Walltaker Feed #${feed_id}`)
       .setDescription("🔄 **Automatic Update** - New wallpaper detected!")
@@ -92,7 +88,6 @@ async function processGuildFeed(client, { guild_id, feed_id, channel_id }) {
         iconURL: DEFAULT_FOOTER_ICON,
       });
 
-    // Prepare buttons
     const buttons = [
       new ButtonBuilder()
         .setLabel("🔗 Walltaker Source")
@@ -100,7 +95,6 @@ async function processGuildFeed(client, { guild_id, feed_id, channel_id }) {
         .setURL(sourceUrl),
     ];
 
-    // Add e621 button if available
     const e621PostId = await getE621PostId(cleanImageUrl);
     if (e621PostId) {
       buttons.push(
@@ -111,13 +105,11 @@ async function processGuildFeed(client, { guild_id, feed_id, channel_id }) {
       );
     }
 
-    // Send message
     await channel.send({
       embeds: [embed],
       components: [new ActionRowBuilder().addComponents(...buttons)],
     });
 
-    // Update history
     await saveLastPostedImage(guild_id, cleanImageUrl);
     console.log(`✅ Posted new image to guild ${guild_id}`);
   } catch (error) {
@@ -128,13 +120,10 @@ async function processGuildFeed(client, { guild_id, feed_id, channel_id }) {
 async function initializeWalltaker(client) {
   console.log("🔄 Initializing Walltaker feeds...");
 
-  // Immediate first check
   await checkAndPostFeeds(client);
 
-  // Set up interval
   const interval = setInterval(() => checkAndPostFeeds(client), CHECK_INTERVAL);
 
-  // Cleanup on client shutdown
   client.on("destroyed", () => clearInterval(interval));
 }
 

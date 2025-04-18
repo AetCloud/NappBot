@@ -8,7 +8,7 @@ if (!dbUrl) {
 }
 
 let databasePool;
-const checkedTables = new Set(); // Keep track of tables checked in this session
+const checkedTables = new Set();
 
 try {
   const dbUri = new URL(dbUrl);
@@ -48,7 +48,6 @@ try {
   process.exit(1);
 }
 
-// --- Table Definitions ---
 const TABLE_DEFS = {
   mewbot_config: `
         CREATE TABLE IF NOT EXISTS mewbot_config (
@@ -87,9 +86,7 @@ const TABLE_DEFS = {
     `,
 };
 
-// --- Helper Functions ---
 
-// Generic query executor
 async function executeQuery(query, params = []) {
   if (!databasePool) {
     console.error("❌ Database pool not initialized!");
@@ -104,15 +101,13 @@ async function executeQuery(query, params = []) {
         error.sqlMessage || error.message
       } | Query: ${query.substring(0, 100)}...`
     );
-    // Consider throwing the error for critical operations or returning null/empty array
     return null;
   }
 }
 
-// Ensures a table exists, runs CREATE TABLE IF NOT EXISTS only once per session
 async function ensureTableExists(tableName) {
   if (checkedTables.has(tableName)) {
-    return; // Already checked this session
+    return;
   }
   const query = TABLE_DEFS[tableName];
   if (!query) {
@@ -121,15 +116,12 @@ async function ensureTableExists(tableName) {
   }
   try {
     await executeQuery(query);
-    checkedTables.add(tableName); // Mark as checked
-    // console.log(`✅ Ensured table exists: ${tableName}`); // Optional: for debugging
+    checkedTables.add(tableName);
   } catch (error) {
     console.error(`❌ Failed to ensure table exists: ${tableName}`, error);
-    // Decide if you need to stop the bot or handle this failure
   }
 }
 
-// --- User Preferences ---
 async function getUserPreference(userId) {
   await ensureTableExists("user_preferences");
   const rows = await executeQuery(
@@ -148,9 +140,8 @@ async function setUserPreference(userId, preference) {
   ));
 }
 
-// --- User Data (Economy, Streaks, Activity) ---
 async function ensureUserRowExists(userId) {
-  await ensureTableExists("users"); // Make sure 'users' table is checked
+  await ensureTableExists("users");
   const rows = await executeQuery(
     "SELECT user_id FROM users WHERE user_id = ?",
     [userId]
@@ -158,9 +149,8 @@ async function ensureUserRowExists(userId) {
   if (!rows || rows.length === 0) {
     await executeQuery(
       "INSERT INTO users (user_id, balance, bank_balance, streak, last_work, last_interest, active_last) VALUES (?, ?, ?, 0, NULL, NULL, NOW())",
-      [userId, 5000, 0] // Default values
+      [userId, 5000, 0]
     );
-    // console.log(`Created new user entry for ${userId}`); // Optional debug log
   }
 }
 
@@ -187,7 +177,7 @@ async function getUserBalance(userId) {
     "SELECT balance, bank_balance, streak FROM users WHERE user_id = ?",
     [userId]
   );
-  return rows[0]; // Should exist after ensureUserRowExists
+  return rows[0];
 }
 
 async function updateUserBalance(userId, walletChange = 0, bankChange = 0) {
@@ -210,7 +200,7 @@ async function getUserStreak(userId) {
     "SELECT streak FROM users WHERE user_id = ?",
     [userId]
   );
-  return rows?.[0]?.streak ?? 0; // Default to 0 if somehow still no row/streak
+  return rows?.[0]?.streak ?? 0;
 }
 
 async function updateStreak(userId, result) {
@@ -222,13 +212,12 @@ async function updateStreak(userId, result) {
   }
   await ensureUserRowExists(userId);
 
-  const currentStreak = await getUserStreak(userId); // Use the function to get current streak
+  const currentStreak = await getUserStreak(userId);
 
   let newStreak;
   if (result === "win") {
     newStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
   } else {
-    // result === "loss"
     newStreak = currentStreak <= 0 ? currentStreak - 1 : -1;
   }
 
@@ -245,7 +234,6 @@ async function markUserActive(userId) {
   ]);
 }
 
-// --- User Installation (OAuth) ---
 async function storeUserInstallation(
   userId,
   accessTokenHash,
@@ -266,7 +254,6 @@ async function storeUserInstallation(
   }
 }
 
-// --- Mewbot Config Functions ---
 
 async function getMewbotConfig(guildId) {
   if (!guildId) return null;
@@ -275,7 +262,6 @@ async function getMewbotConfig(guildId) {
     "SELECT watch_mode, watch_channel_id, output_channel_id, mewbot_user_id, enabled FROM mewbot_config WHERE guild_id = ?",
     [guildId]
   );
-  // Return default structure if no row exists for the guild
   return rows?.length
     ? rows[0]
     : {
@@ -302,7 +288,7 @@ async function setMewbotWatchConfig(
     `INSERT INTO mewbot_config (guild_id, watch_mode, watch_channel_id, mewbot_user_id, enabled)
      VALUES (?, ?, ?, ?, TRUE)
      ON DUPLICATE KEY UPDATE watch_mode = VALUES(watch_mode), watch_channel_id = VALUES(watch_channel_id), mewbot_user_id = COALESCE(?, mewbot_user_id), enabled = TRUE`,
-    [guildId, mode, watchChannel, mewbotIdToSet, mewbotIdToSet] // Pass mewbotIdToSet twice for COALESCE
+    [guildId, mode, watchChannel, mewbotIdToSet, mewbotIdToSet]
   ));
 }
 
@@ -331,31 +317,26 @@ async function setMewbotUserId(guildId, mewbotUserId) {
 
 async function disableMewbotHelper(guildId) {
   if (!guildId) return false;
-  await ensureTableExists("mewbot_config"); // Ensure table exists before trying to update
-  // Check if a row exists before updating, or just let the UPDATE potentially affect 0 rows
+  await ensureTableExists("mewbot_config");
   const result = await executeQuery(
     "UPDATE mewbot_config SET enabled = FALSE WHERE guild_id = ?",
     [guildId]
   );
-  // Check if the update was successful or if the row existed
-  return result && result.affectedRows > 0; // More robust check
+  return result && result.affectedRows > 0;
 }
 
-// --- Exports ---
 if (!databasePool) {
   console.error("❌ MySQL connection pool failed to initialize. Exiting.");
   process.exit(1);
 }
 
 module.exports = {
-  database: databasePool, // Export the pool directly if needed
-  executeQuery, // Export the helper if useful elsewhere
-  ensureTableExists, // Export if needed for explicit checks elsewhere
-  // User Preferences
+  database: databasePool,
+  executeQuery,
+  ensureTableExists,
   getUserPreference,
   setUserPreference,
-  // User Data (Economy, etc.)
-  ensureUserRowExists, // Exported for potential direct use
+  ensureUserRowExists,
   getUserBalance,
   updateUserBalance,
   getUserStreak,
@@ -363,9 +344,7 @@ module.exports = {
   getUserLastWork,
   updateUserLastWork,
   markUserActive,
-  // OAuth / Installation
   storeUserInstallation,
-  // Mewbot Config
   getMewbotConfig,
   setMewbotWatchConfig,
   setMewbotOutputChannel,

@@ -1,7 +1,6 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const { getUserPreference } = require("../../utils/database");
 
-// Image database
 const images = {
   female: {
     behind: [

@@ -42,10 +42,8 @@ module.exports = {
       });
     }
 
-    // ✅ Update user balance (subtract from bank, add to wallet)
     await updateUserBalance(userId, amount, -amount);
 
-    // ✅ Mark user as active
     await database.execute(
       "UPDATE users SET active_last = NOW() WHERE user_id = ?",
       [userId]

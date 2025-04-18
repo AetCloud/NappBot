@@ -3,14 +3,14 @@ const {
   PermissionFlagsBits,
   EmbedBuilder,
 } = require("discord.js");
-const { getMewbotConfig } = require("../../utils/database"); // Adjust path if needed
+const { getMewbotConfig } = require("../../utils/database");
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("mewbotsettings")
     .setDescription("⚙️ View the current Mewbot helper settings.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // Only admins
-    .setDMPermission(false) // Guild only command,
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
     .addSubcommand((subcommand) =>
       subcommand
         .setName("view")
@@ -36,7 +36,6 @@ module.exports = {
         let watchChannelName = "N/A";
         if (config.watch_mode === "specific" && config.watch_channel_id) {
           try {
-            // Use interaction.guild.channels.fetch to ensure it's fetched from the correct guild cache
             const channel = await interaction.guild.channels
               .fetch(config.watch_channel_id)
               .catch(() => null);
@@ -66,7 +65,7 @@ module.exports = {
 
         const embed = new EmbedBuilder()
           .setTitle("👀 Mewbot Helper Configuration")
-          .setColor(config.enabled ? "#57F287" : "#ED4245") // Green if enabled, Red if disabled
+          .setColor(config.enabled ? "#57F287" : "#ED4245")
           .addFields(
             {
               name: "Status",

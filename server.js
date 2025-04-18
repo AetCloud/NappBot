@@ -9,7 +9,6 @@ const { storeUserInstallation } = require("./utils/database");
 const app = express();
 app.disable("x-powered-by");
 
-// Middleware
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(
@@ -19,14 +18,12 @@ app.use(
   })
 );
 
-// Security middleware
 app.use((req, res, next) => {
   res.setHeader("X-Content-Type-Options", "nosniff");
   res.setHeader("X-Frame-Options", "DENY");
   next();
 });
 
-// Health check endpoint
 app.get("/", (req, res) => {
   res.status(200).json({
     status: "ok",
@@ -35,7 +32,6 @@ app.get("/", (req, res) => {
   });
 });
 
-// OAuth2 Configuration
 const DISCORD_API = "https://discord.com/api";
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
@@ -43,7 +39,6 @@ const REDIRECT_URI =
   process.env.REDIRECT_URI ||
   "https://web-production-c3a9.up.railway.app/oauth/callback";
 
-// Token hashing function
 const hashToken = (token) => {
   if (!process.env.HMAC_SECRET) {
     throw new Error("HMAC_SECRET environment variable is not set");
@@ -54,13 +49,11 @@ const hashToken = (token) => {
     .digest("hex");
 };
 
-// OAuth callback handler
 app.get("/oauth/callback", async (req, res) => {
   try {
     const { code } = req.query;
     if (!code) return res.status(400).send("Authorization code required");
 
-    // Exchange code for tokens
     const tokenResponse = await axios.post(
       `${DISCORD_API}/oauth2/token`,
       querystring.stringify({
@@ -76,14 +69,12 @@ app.get("/oauth/callback", async (req, res) => {
 
     const { access_token, refresh_token } = tokenResponse.data;
 
-    // Get user details
     const userResponse = await axios.get(`${DISCORD_API}/users/@me`, {
       headers: { Authorization: `Bearer ${access_token}` },
     });
 
     const { id: userId, username } = userResponse.data;
 
-    // Store hashed tokens
     const storageSuccess = await storeUserInstallation(
       userId,
       hashToken(access_token),
@@ -109,13 +100,11 @@ app.get("/oauth/callback", async (req, res) => {
   }
 });
 
-// Server configuration
 const port = process.env.PORT || 3000;
 const server = app.listen(port, "0.0.0.0", () => {
   console.log(`🌐 Server running on port ${port}`);
 });
 
-// Graceful shutdown
 const shutdown = async () => {
   console.log("🛑 Shutting down server...");
   server.close(() => {

@@ -7,16 +7,16 @@ const {
   setMewbotWatchConfig,
   setMewbotOutputChannel,
   disableMewbotHelper,
-} = require("../../utils/database"); // Adjust path if needed
+} = require("../../utils/database");
 
-const MEWBOT_USER_ID = "519850436899897346"; // Hardcoded Mewbot User ID
+const MEWBOT_USER_ID = "519850436899897346";
 
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("mewbotsetup")
     .setDescription("🔧 Configure or disable the Mewbot helper settings.")
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild) // Only admins
-    .setDMPermission(false) // Guild only command
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false)
     .addSubcommand((subcommand) =>
       subcommand
         .setName("setup")
@@ -38,8 +38,8 @@ module.exports = {
               .setDescription(
                 "The specific channel to watch (if watch_mode is 'specific')."
               )
-              .addChannelTypes(ChannelType.GuildText) // Only allow text channels
-              .setRequired(false) // Required conditionally based on mode
+              .addChannelTypes(ChannelType.GuildText)
+              .setRequired(false)
         )
         .addChannelOption((option) =>
           option
@@ -68,7 +68,7 @@ module.exports = {
         const watchMode = interaction.options.getString("watch_mode");
         const watchChannel = interaction.options.getChannel("watch_channel");
         const outputChannel = interaction.options.getChannel("output_channel");
-        const mewbotUserId = MEWBOT_USER_ID; // Using the hardcoded User ID // Validate watch channel requirement
+        const mewbotUserId = MEWBOT_USER_ID;
 
         if (watchMode === "specific" && !watchChannel) {
           return interaction.editReply(
@@ -76,20 +76,19 @@ module.exports = {
           );
         }
         if (watchMode === "all" && watchChannel) {
-          // Provide feedback instead of erroring out
           await interaction.followUp({
             content:
               "ℹ️ You selected 'all' channels mode, the specific 'watch_channel' will be ignored.",
             ephemeral: true,
           });
-        } // Save watch settings - pass watchChannel?.id which is null if not provided or mode is 'all'
+        }
 
         const watchSuccess = await setMewbotWatchConfig(
           guildId,
           watchMode,
           watchChannel?.id,
           mewbotUserId
-        ); // Save output channel settings (pass null if not provided to potentially clear it)
+        );
 
         const outputSuccess = await setMewbotOutputChannel(
           guildId,
@@ -97,7 +96,6 @@ module.exports = {
         );
 
         if (watchSuccess && outputSuccess) {
-          // Check if both operations were successful
           const watchChannelText =
             watchChannel && watchMode === "specific"
               ? `${watchChannel}`

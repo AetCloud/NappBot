@@ -3,7 +3,7 @@ const { evaluateHand } = require("./pokerUtils");
 class PokerAI {
   constructor(name, strategy) {
     this.name = name;
-    this.strategy = strategy; // 'TAG', 'LAG', 'TP', 'LP', 'Exploitative'
+    this.strategy = strategy;
     this.hand = [];
     this.folded = false;
     this.currentBet = 0;
@@ -84,7 +84,7 @@ class PokerAI {
     let maxBet = Math.min(pot * 0.75, 1000);
 
     switch (this.strategy) {
-      case "TAG": // Tight-Aggressive
+      case "TAG":
         if (handStrength >= 7) {
           action = "raise";
           betAmount = maxBet;
@@ -96,7 +96,7 @@ class PokerAI {
         }
         break;
 
-      case "LAG": // Loose-Aggressive
+      case "LAG":
         if (handStrength >= 6 || bluffChance) {
           action = "raise";
           betAmount = Math.min(pot * 0.5, 600);
@@ -106,7 +106,7 @@ class PokerAI {
         }
         break;
 
-      case "TP": // Tight-Passive
+      case "TP":
         if (handStrength >= 7) {
           action = "call";
           betAmount = currentBet;
@@ -115,7 +115,7 @@ class PokerAI {
         }
         break;
 
-      case "LP": // Loose-Passive
+      case "LP":
         if (handStrength >= 4) {
           action = "call";
           betAmount = currentBet;
@@ -125,7 +125,7 @@ class PokerAI {
         }
         break;
 
-      case "Exploitative": // Adaptive AI
+      case "Exploitative":
         const aggressiveOpponents = players.filter(
           (p) => !p.folded && p.lastAction === "raise"
         ).length;

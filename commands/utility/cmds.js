@@ -5,7 +5,7 @@ const {
   ButtonBuilder,
   ButtonStyle,
   ApplicationCommandOptionType,
-  ComponentType, // Import ComponentType
+  ComponentType,
 } = require("discord.js");
 const path = require("path");
 
@@ -13,7 +13,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("cmds")
     .setDescription("📜 Browse available commands by category."),
-  defer: true, // Keep this, interactionCreate.js handles the initial defer
+  defer: true,
 
   async execute(interaction) {
     try {
@@ -23,12 +23,11 @@ module.exports = {
         return interaction.editReply("⚠️ No commands available.");
       }
 
-      // --- Prepare Data ---
       const categories = {};
       let commandCount = 0;
 
       commandList.forEach((cmd) => {
-        if (!cmd.filePath) return; // Skip if no path
+        if (!cmd.filePath) return;
         const category = path.dirname(cmd.filePath).split(path.sep).pop();
         const capitalizedCategory =
           category.charAt(0).toUpperCase() + category.slice(1);
@@ -66,12 +65,10 @@ module.exports = {
 
       let currentCategoryIndex = 0;
 
-      // --- Helper Functions ---
       const generateEmbed = (index) => {
         const categoryName = sortedCategoryNames[index];
         const commandsInCategory = categories[categoryName];
 
-        // Simple truncation if too long for one field - adjust as needed
         let commandString = commandsInCategory.join("\n");
         if (commandString.length > 1024) {
           commandString = commandString.substring(0, 1020) + "\n...";
@@ -108,7 +105,6 @@ module.exports = {
         );
       };
 
-      // --- Initial Reply ---
       const initialEmbed = generateEmbed(currentCategoryIndex);
       const initialButtons = generateButtons(currentCategoryIndex);
 
@@ -117,11 +113,10 @@ module.exports = {
         components: [initialButtons],
       });
 
-      // --- Collector ---
       const collector = message.createMessageComponentCollector({
-        componentType: ComponentType.Button, // Specify Button type
+        componentType: ComponentType.Button,
         filter: (i) => i.user.id === interaction.user.id,
-        time: 120000, // 2 minutes inactivity timeout
+        time: 120000,
       });
 
       collector.on("collect", async (i) => {
@@ -148,19 +143,15 @@ module.exports = {
             updateError
           );
         }
-        // No need to reset timer manually here, collector handles inactivity timeout
       });
 
       collector.on("end", async (collected, reason) => {
-        // Edit the message to remove buttons after timeout or manual stop
         try {
           await interaction.editReply({
-            embeds: [generateEmbed(currentCategoryIndex)], // Keep the last embed
-            components: [], // Remove buttons
+            embeds: [generateEmbed(currentCategoryIndex)],
+            components: [],
           });
-        } catch (error) {
-          // Ignore if message was deleted
-        }
+        } catch (error) {}
       });
     } catch (error) {
       console.error("❌ [ERROR] /cmds failed:", error);

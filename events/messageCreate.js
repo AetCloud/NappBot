@@ -5,26 +5,21 @@ const {
   ButtonStyle,
   Collection,
 } = require("discord.js");
-const { getMewbotConfig } = require("../utils/database"); // Adjust path if needed
-let pokemonDataMap = new Map(); // Store parsed data: { pokedexId: name }
+const { getMewbotConfig } = require("../utils/database");
+let pokemonDataMap = new Map();
 
-// --- Constants ---
-const COOLDOWN_SECONDS = 5; // 5 seconds cooldown
+const COOLDOWN_SECONDS = 5;
 const guessCooldowns = new Collection();
 
 const FORM_SUFFIX_MAP = {
-  // 0: Standard (no suffix needed)
   1: "-alola",
   2: "-galar",
   3: "-hisui",
   4: "-paldea",
-  // Add more mappings if Mewbot uses other numbers/suffixes
 };
 
-// --- Load pokemonData.json ---
 try {
-  // Use require to load the JSON file directly
-  const pokemonList = require("../utils/pokemonData.json"); // Adjust path if needed
+  const pokemonList = require("../utils/pokemonData.json");
 
   if (!Array.isArray(pokemonList)) {
     throw new Error("pokemonData.json is not a valid JSON array.");
@@ -35,7 +30,6 @@ try {
   );
   let loadedCount = 0;
   for (const pokemon of pokemonList) {
-    // Only store the base form (form_id 0) in the map for base name lookup
     if (
       pokemon &&
       typeof pokemon.id === "number" &&
@@ -43,11 +37,9 @@ try {
       pokemon.form_id === 0 &&
       typeof pokemon.mewbot_name === "string"
     ) {
-      // Use the ID from the JSON as the key and the name as the value
       pokemonDataMap.set(pokemon.id, pokemon.mewbot_name.toLowerCase());
       loadedCount++;
     } else if (pokemon?.form_id !== 0) {
-      // Ignore non-base forms during map creation, they are handled dynamically later
     } else {
       console.warn(
         `[Pokemon Loader] Skipping invalid entry in pokemonData.json:`,
@@ -69,13 +61,9 @@ try {
     "❌ CRITICAL: Failed to load or parse utils/pokemonData.json:",
     err
   );
-  // Bot might still run, but Mewbot helper will likely fail.
 }
-// -----------------------------
 
-// --- Helper Function to Parse Embed ---
 function parseMewbotEmbed(embed) {
-  // ... (Keep the same parseMewbotEmbed function as before) ...
   let hint = null;
   let imageUrl = null;
 
@@ -125,11 +113,9 @@ function parseMewbotEmbed(embed) {
 module.exports = {
   name: "messageCreate",
   async execute(message, client) {
-    // --- Basic Checks & Config Fetch ---
     if (message.author.id === client.user.id || !message.guild) return;
     if (pokemonDataMap.size === 0) {
-      // console.warn("[Mewbot Helper] Pokemon data map is empty, skipping execution.");
-      return; // Don't run if Pokemon data failed to load
+      return;
     }
 
     const guildId = message.guild.id;
@@ -144,34 +130,29 @@ module.exports = {
       return;
     }
 
-    // --- Author Check & Feature Status ---
     if (
       !config ||
       !config.enabled ||
       !config.mewbot_user_id ||
       message.author.id !== config.mewbot_user_id
     ) {
-      return; // Exit if not enabled, not configured, or not the right bot
+      return;
     }
 
-    // --- Watch Channel Check ---
     if (
       config.watch_mode === "specific" &&
       (!config.watch_channel_id ||
         message.channel.id !== config.watch_channel_id)
     ) {
-      return; // Not in the specific channel
+      return;
     }
 
-    // --- Embed Check ---
     if (!message.embeds || message.embeds.length === 0) return;
     const mewbotInfo = parseMewbotEmbed(message.embeds[0]);
-    if (!mewbotInfo) return; // Embed doesn't match
+    if (!mewbotInfo) return;
 
-    // --- Process Hint and Image URL ---
     const { hint, imageUrl } = mewbotInfo;
 
-    // Parse Pokémon ID and Form ID from URL
     let parsedId = null;
     let parsedFormId = null;
     const urlMatch = imageUrl.match(/\/(\d+)-(\d+).*\.png/);
@@ -182,31 +163,29 @@ module.exports = {
       } catch (e) {
         console.error("[Mewbot Helper] Error parsing ID/Form:", e);
         return;
-      } // Exit if parsing fails
+      }
     } else {
       console.warn(
         `[Mewbot Helper] Could not parse ID/Form from URL: ${imageUrl}`
       );
-      return; // Cannot proceed without ID/Form
+      return;
     }
 
-    // --- Get Base Name and Construct Form Name ---
     const baseName = pokemonDataMap.get(parsedId);
     if (!baseName) {
       console.warn(
         `[Mewbot Helper] No base name found for Pokedex ID: ${parsedId} in pokemonDataMap.`
       );
-      return; // Cannot proceed without base name
+      return;
     }
 
     const formSuffix = FORM_SUFFIX_MAP[parsedFormId] || "";
     const expectedName = (baseName + formSuffix).toLowerCase();
 
-    // --- Process Hint for Regex Matching ---
     const processedHint = hint.replace(/\s+/g, "");
     const hintLength = processedHint.length;
     if (hintLength === 0 || expectedName.length !== hintLength) {
-      return; // Length mismatch
+      return;
     }
 
     const hintRegexPattern =
@@ -232,22 +211,18 @@ module.exports = {
       return;
     }
 
-    // --- Match Constructed Name with Hint Regex ---
     let isMatch = hintRegex.test(expectedName);
 
-    // --- Prepare and Send Response ---
     if (isMatch) {
-      // Cooldown check before sending success message
-      const cooldownKey = `${message.channel.id}-${parsedId}-${parsedFormId}`; // Cooldown per channel per specific pokemon spawn
+      const cooldownKey = `${message.channel.id}-${parsedId}-${parsedFormId}`;
       const now = Date.now();
       if (guessCooldowns.has(cooldownKey)) {
         const expirationTime = guessCooldowns.get(cooldownKey);
         if (now < expirationTime) {
-          // console.log(`[Mewbot Helper] Guess for ${expectedName} in ${message.channel.id} is on cooldown.`);
-          return; // Don't send if already guessed recently in this channel
+          return;
         }
       }
-      // Set cooldown *after* confirming a match will be sent
+
       guessCooldowns.set(cooldownKey, now + COOLDOWN_SECONDS * 1000);
       setTimeout(
         () => guessCooldowns.delete(cooldownKey),
@@ -264,7 +239,6 @@ module.exports = {
           inline: true,
         });
 
-      // Determine output channel
       let outputChannel = message.channel;
       let fetchedOutputChannel = false;
       if (
@@ -300,7 +274,6 @@ module.exports = {
         );
       }
 
-      // Send the response
       try {
         await outputChannel.send({
           embeds: [suggestionEmbed],
@@ -325,6 +298,5 @@ module.exports = {
         }
       }
     }
-    // No 'else' needed - if it's not a match, we just don't send anything.
   },
 };

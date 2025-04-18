@@ -10,7 +10,7 @@ const DEFAULT_BLACKLIST = [
   "vore",
 ];
 
-const API_HEADERS = { "User-Agent": "NappBot/1.0 (by Napp on Rule34)" };
+const API_HEADERS = { "User-Agent": "NappBot/1.0" };
 
 async function fetchRule34Images(tags = [], count = 10) {
   if (tags.length === 0) tags.push("score:>100");

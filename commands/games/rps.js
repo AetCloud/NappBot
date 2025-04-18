@@ -3,16 +3,16 @@ const { SlashCommandBuilder } = require("discord.js");
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("rps")
-    .setDescription("🗿📄✂️ Play Rock, Paper, Scissors against the bot!") // Updated description
+    .setDescription("🗿📄✂️ Play Rock, Paper, Scissors against the bot!")
     .addStringOption((option) =>
       option
         .setName("choice")
         .setDescription("Choose rock, paper, or scissors")
         .setRequired(true)
         .addChoices(
-          { name: "Rock 🗿", value: "rock" }, // Standard emoji
-          { name: "Paper 📄", value: "paper" }, // Standard emoji
-          { name: "Scissors ✂️", value: "scissors" } // Standard emoji
+          { name: "Rock 🗿", value: "rock" },
+          { name: "Paper 📄", value: "paper" },
+          { name: "Scissors ✂️", value: "scissors" }
         )
     ),
   async execute(interaction) {
@@ -21,7 +21,6 @@ module.exports = {
       const choices = ["rock", "paper", "scissors"];
       const botChoice = choices[Math.floor(Math.random() * choices.length)];
 
-      // Map choices to emojis for the reply
       const choiceEmojis = {
         rock: "🗿",
         paper: "📄",
@@ -33,31 +32,30 @@ module.exports = {
 
       if (userChoice === botChoice) {
         result = "It's a tie!";
-        resultEmoji = "🤝"; // Tie emoji
+        resultEmoji = "🤝";
       } else if (
         (userChoice === "rock" && botChoice === "scissors") ||
         (userChoice === "paper" && botChoice === "rock") ||
         (userChoice === "scissors" && botChoice === "paper")
       ) {
         result = "You win!";
-        resultEmoji = "🎉"; // Win emoji
+        resultEmoji = "🎉";
       } else {
         result = "You lose!";
-        resultEmoji = "💀"; // Lose emoji
+        resultEmoji = "💀";
       }
 
       await interaction.reply(
         `You chose **${userChoice}** <span class="math-inline">\{choiceEmojis\[userChoice\]\}, I chose \*\*</span>{botChoice}** ${choiceEmojis[botChoice]}. ${result} ${resultEmoji}`
       );
     } catch (error) {
-      console.error("Error executing /rps command:", error); // Added better logging
+      console.error("Error executing /rps command:", error);
       await interaction.reply({
-        // Reply ephemerally on error
         content:
           "An error occurred while playing the game. Please try again later.",
         ephemeral: true,
       });
     }
   },
-  modulePath: __filename, // Keep if used elsewhere, otherwise optional
+  modulePath: __filename,
 };

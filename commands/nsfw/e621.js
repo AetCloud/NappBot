@@ -92,7 +92,7 @@ module.exports = {
 
     const collector = message.createMessageComponentCollector({
       filter: (i) => i.user.id === interaction.user.id,
-      time: 90000, // 1.5 minutes
+      time: 90000,
     });
 
     collector.on("collect", async (i) => {
@@ -107,16 +107,13 @@ module.exports = {
         components: [createRow()],
       });
 
-      // Reset the collector's inactivity timer
       collector.resetTimer();
     });
 
     collector.on("end", async () => {
       try {
         await interaction.editReply({ components: [] });
-      } catch (error) {
-        // Ignore error if message was deleted
-      }
+      } catch (error) {}
     });
   },
   modulePath: __filename,

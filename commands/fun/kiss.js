@@ -57,7 +57,6 @@ module.exports = {
       `${sender} can't resist and kisses ${recipient} on the cheek! 💕`,
     ];
 
-    // Randomly select a GIF and message
     const randomGif = kissGifs[Math.floor(Math.random() * kissGifs.length)];
     const randomMessage =
       kissMessages[Math.floor(Math.random() * kissMessages.length)];

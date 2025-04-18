@@ -2,12 +2,12 @@ const os = require("os");
 const process = require("process");
 
 function getSystemMetrics() {
-  const totalRam = os.totalmem() / 1024 / 1024 / 1024; // GB
-  const freeRam = os.freemem() / 1024 / 1024 / 1024; // GB
+  const totalRam = os.totalmem() / 1024 / 1024 / 1024;
+  const freeRam = os.freemem() / 1024 / 1024 / 1024;
   const usedRam = totalRam - freeRam;
-  const cpuLoad = os.loadavg()[0]; // 1-minute CPU load average
-  const uptime = os.uptime(); // System uptime in seconds
-  const processMemory = process.memoryUsage().rss / 1024 / 1024; // MB
+  const cpuLoad = os.loadavg()[0];
+  const uptime = os.uptime();
+  const processMemory = process.memoryUsage().rss / 1024 / 1024;
 
   return {
     totalRam: totalRam.toFixed(2),
