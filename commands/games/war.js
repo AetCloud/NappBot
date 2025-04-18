@@ -2,17 +2,255 @@ const path = require("path");
 const {
   SlashCommandBuilder,
   EmbedBuilder,
-  ActionRowBuilder,
   ButtonBuilder,
+  ActionRowBuilder,
   ButtonStyle,
+  ComponentType,
   InteractionFlags,
 } = require("discord.js");
 const {
   getUserBalance,
   updateUserBalance,
   getUserStreak,
-  updateUserStreak,
+  updateStreak,
+  markUserActive,
 } = require("../../utils/database");
+
+const SUITS = ["♠️", "♥️", "♦️", "♣️"];
+const RANKS = [
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "J",
+  "Q",
+  "K",
+  "A",
+];
+const RANK_VALUES = {
+  2: 2,
+  3: 3,
+  4: 4,
+  5: 5,
+  6: 6,
+  7: 7,
+  8: 8,
+  9: 9,
+  10: 10,
+  J: 11,
+  Q: 12,
+  K: 13,
+  A: 14,
+};
+
+function getRandomCard() {
+  const rank = RANKS[Math.floor(Math.random() * RANKS.length)];
+  const suit = SUITS[Math.floor(Math.random() * SUITS.length)];
+  return { rank, suit, value: RANK_VALUES[rank] };
+}
+
+function getWarResult(playerValue, dealerValue) {
+  if (playerValue > dealerValue) return "win";
+  if (playerValue < dealerValue) return "loss";
+  return "tie";
+}
+
+const TIPS = {
+  win: [
+    "🔥 Keep up the streak! Maybe raise your bet?",
+    "✅ Winning is great! But don't push your luck too hard!",
+    "💡 If you're on a streak, consider stopping at a set goal.",
+  ],
+  loss: [
+    "❌ Bad luck! Maybe lower your bet to recover?",
+    "📉 Losing streak? Take a break or change your strategy!",
+    "🤔 If you're losing often, think about pacing your bets.",
+  ],
+  tie: [
+    "⚖️ A tie! Consider playing again for a better outcome.",
+    "🤝 A tie means nobody wins. Will you go for another round?",
+    "🔄 No loss, no win. Maybe this is your chance to go big?",
+  ],
+};
+
+async function playWarRound(interaction, bet, isFollowUp = false) {
+  const userId = interaction.user.id;
+  try {
+    await markUserActive(userId);
+
+    const balanceData = await getUserBalance(userId);
+    if (!balanceData || bet > balanceData.balance) {
+      const replyOptions = {
+        content: `❌ You ${
+          isFollowUp ? "no longer " : ""
+        }have enough coins for this bet! (Need ${bet}, Have ${
+          balanceData?.balance ?? 0
+        })`,
+        ephemeral: true,
+      };
+      if (isFollowUp && interaction.isMessageComponent()) {
+        await interaction.followUp(replyOptions);
+      } else if (
+        !isFollowUp &&
+        interaction.isChatInputCommand() &&
+        (interaction.replied || interaction.deferred)
+      ) {
+        await interaction.editReply(replyOptions);
+      } else {
+        await interaction.reply(replyOptions);
+      }
+      return;
+    }
+
+    const playerCard = getRandomCard();
+    const dealerCard = getRandomCard();
+    const result = getWarResult(playerCard.value, dealerCard.value);
+
+    let earnings = 0;
+    if (result === "win") earnings = bet;
+    else if (result === "loss") earnings = -bet;
+
+    if (result !== "tie") {
+      await updateUserBalance(userId, earnings, 0);
+      await updateStreak(userId, result);
+    }
+    const finalStreak = await getUserStreak(userId);
+    const finalBalance = await getUserBalance(userId);
+
+    const embed = new EmbedBuilder()
+      .setTitle("⚔️ War Results")
+      .setColor(
+        result === "win" ? "Green" : result === "loss" ? "Red" : "Yellow"
+      )
+      .addFields(
+        {
+          name: "Your Card",
+          value: `${playerCard.rank}${playerCard.suit} (${playerCard.value})`,
+          inline: true,
+        },
+        {
+          name: "Dealer's Card",
+          value: `${dealerCard.rank}${dealerCard.suit} (${dealerCard.value})`,
+          inline: true,
+        },
+        { name: "\u200B", value: "\u200B" },
+        {
+          name: "🎯 Result",
+          value:
+            result === "win"
+              ? "✅ You won!"
+              : result === "loss"
+              ? "❌ You lost!"
+              : "⚖️ It's a tie!",
+          inline: true,
+        },
+        {
+          name: "💰 Payout",
+          value: `${earnings >= 0 ? "+" : ""}${earnings} coins`,
+          inline: true,
+        },
+        {
+          name: "🔥 Streak",
+          value:
+            finalStreak > 0
+              ? `🔥 **${finalStreak}-win streak!**`
+              : finalStreak < 0
+              ? `❄️ **${Math.abs(finalStreak)}-loss streak!**`
+              : "😐 No streak",
+          inline: true,
+        },
+        {
+          name: "💡 Tip",
+          value: TIPS[result][Math.floor(Math.random() * TIPS[result].length)],
+          inline: false,
+        },
+        {
+          name: "📊 New Balance",
+          value: `🪙 ${finalBalance.balance}`,
+          inline: false,
+        }
+      )
+      .setFooter({ text: `Bet: ${bet} coins` });
+
+    const playAgainButton = new ButtonBuilder()
+      .setCustomId(`war_play_again_${interaction.id}`)
+      .setLabel("Play Again")
+      .setStyle(ButtonStyle.Success);
+    const row = new ActionRowBuilder().addComponents(playAgainButton);
+
+    const replyOptions = {
+      embeds: [embed],
+      components: [row],
+      fetchReply: true,
+    };
+    let message;
+    if (isFollowUp && interaction.isMessageComponent()) {
+      message = await interaction.editReply(replyOptions);
+    } else if (
+      !isFollowUp &&
+      interaction.isChatInputCommand() &&
+      (interaction.replied || interaction.deferred)
+    ) {
+      message = await interaction.editReply(replyOptions);
+    } else {
+      message = await interaction.reply(replyOptions);
+    }
+
+    const filter = (i) =>
+      i.user.id === userId &&
+      i.customId === `war_play_again_${interaction.id}` &&
+      i.message.id === message.id;
+    const collector = message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      filter,
+      time: 30000,
+      max: 1,
+    });
+
+    collector.on("collect", async (i) => {
+      await i.deferUpdate();
+      await playWarRound(i, bet, true);
+    });
+
+    collector.on("end", async (collected, reason) => {
+      if (reason !== "limit" && reason !== "user") {
+        try {
+          if (message && !message.deleted) {
+            await message.edit({ components: [] });
+          }
+        } catch (error) {
+          console.warn(
+            "Failed to remove War 'Play Again' button:",
+            error.message
+          );
+        }
+      }
+    });
+  } catch (error) {
+    console.error("Error during playWarRound:", error);
+    const errorContent = "❌ An error occurred during the War game.";
+    try {
+      if (isFollowUp && interaction.isMessageComponent())
+        await interaction.followUp({ content: errorContent, ephemeral: true });
+      else if (
+        !isFollowUp &&
+        interaction.isChatInputCommand() &&
+        (interaction.replied || interaction.deferred)
+      )
+        await interaction.editReply({
+          content: errorContent,
+          embeds: [],
+          components: [],
+        });
+      else await interaction.reply({ content: errorContent, ephemeral: true });
+    } catch {}
+  }
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -23,189 +261,23 @@ module.exports = {
         .setName("bet")
         .setDescription("Amount of coins to bet")
         .setRequired(true)
+        .setMinValue(10)
     ),
 
   modulePath: path.resolve(__filename),
 
   async execute(interaction) {
-    console.log(`⚡ Executing /war from: ${module.exports.modulePath}`);
-
-    const userId = interaction.user.id;
+    await interaction.deferReply();
     const bet = interaction.options.getInteger("bet");
-
-    try {
-      const balance = await getUserBalance(userId);
-      if (!balance || bet <= 0 || bet > balance.balance) {
-        return interaction.reply({
-          content: "❌ Invalid bet amount or insufficient balance!",
-          ephemeral: true,
-        });
-      }
-
-      await playWar(interaction, userId, bet);
-    } catch (error) {
-      console.error(error);
-      return interaction.reply({
-        content: "❌ An error occurred while processing your request.",
+    const initialBalance = await getUserBalance(interaction.user.id);
+    if (!initialBalance || bet > initialBalance.balance) {
+      return interaction.editReply({
+        content: `❌ You don't have enough coins for this bet! (Need ${bet}, Have ${
+          initialBalance?.balance ?? 0
+        })`,
         ephemeral: true,
       });
     }
+    await playWarRound(interaction, bet, false);
   },
 };
-
-async function playWar(interaction, userId, bet) {
-  const suits = ["♠️", "♥️", "♦️", "♣️"];
-  const getRandomCard = () => ({
-    value: Math.floor(Math.random() * 13) + 2,
-    suit: suits[Math.floor(Math.random() * suits.length)],
-  });
-
-  const playerCard = getRandomCard();
-  const dealerCard = getRandomCard();
-
-  const result =
-    playerCard.value > dealerCard.value
-      ? "win"
-      : playerCard.value < dealerCard.value
-      ? "lose"
-      : "tie";
-
-  let winnings = 0;
-  if (result === "win") winnings = bet;
-  if (result === "lose") winnings = -bet;
-
-  try {
-    if (result !== "tie") await updateUserBalance(userId, winnings, 0);
-
-    const streak = await getUserStreak(userId);
-    let newStreak = streak ? streak : 0;
-
-    switch (result) {
-      case "win":
-        newStreak = newStreak >= 0 ? newStreak + 1 : 1;
-        break;
-      case "lose":
-        newStreak = newStreak <= 0 ? newStreak - 1 : -1;
-        break;
-      case "tie":
-        break;
-    }
-
-    await updateUserStreak(userId, newStreak);
-
-    const tips = {
-      win: [
-        "🔥 Keep up the streak! Maybe raise your bet?",
-        "✅ Winning is great! But don't push your luck too hard!",
-        "💡 If you're on a streak, consider stopping at a set goal.",
-      ],
-      lose: [
-        "❌ Bad luck! Maybe lower your bet to recover?",
-        "📉 Losing streak? Take a break or change your strategy!",
-        "🤔 If you're losing often, think about pacing your bets.",
-      ],
-      tie: [
-        "⚖️ A tie! Consider playing again for a better outcome.",
-        "🤝 A tie means nobody wins. Will you go for another round?",
-        "🔄 No loss, no win. Maybe this is your chance to go big?",
-      ],
-    };
-
-    const embed = new EmbedBuilder()
-      .setTitle("⚔️ War")
-      .setDescription(`You bet **${bet} coins**`)
-      .addFields(
-        {
-          name: "🎴 Your Card",
-          value: `${playerCard.value} ${playerCard.suit}`,
-          inline: true,
-        },
-        {
-          name: "🎴 Dealer's Card",
-          value: `${dealerCard.value} ${dealerCard.suit}`,
-          inline: true,
-        },
-        {
-          name: "🎯 Result",
-          value:
-            result === "win"
-              ? "✅ You won!"
-              : result === "lose"
-              ? "❌ You lost!"
-              : "⚖️ It's a tie!",
-          inline: false,
-        },
-        {
-          name: "💰 Payout",
-          value:
-            result === "win"
-              ? `+${winnings} coins`
-              : result === "lose"
-              ? `-${bet} coins`
-              : "0 coins",
-          inline: true,
-        },
-        {
-          name: "🔥 Streak",
-          value:
-            newStreak > 0
-              ? `🔥 **${newStreak}-win streak!**`
-              : newStreak < 0
-              ? `❄️ **${Math.abs(newStreak)}-loss streak!**`
-              : "😐 No streak",
-          inline: true,
-        },
-        {
-          name: "💡 Tip",
-          value: tips[result][Math.floor(Math.random() * tips[result].length)],
-          inline: false,
-        }
-      )
-      .setColor(
-        result === "win" ? "Green" : result === "lose" ? "Red" : "Yellow"
-      );
-
-    const playAgainButton = new ButtonBuilder()
-      .setCustomId(`play_again_${userId}`)
-      .setLabel("🔄 Play Again")
-      .setStyle(ButtonStyle.Success);
-
-    const row = new ActionRowBuilder().addComponents(playAgainButton);
-
-    const message = await interaction.reply({
-      embeds: [embed],
-      components: [row],
-      fetchReply: true,
-    });
-
-    const filter = (i) =>
-      i.user.id === userId && i.customId === `play_again_${userId}`;
-    const collector = message.createMessageComponentCollector({
-      filter,
-      time: 30000,
-    });
-
-    collector.on("collect", async (i) => {
-      await i.deferUpdate();
-      collector.stop();
-      await restartGame(i, userId, bet);
-    });
-
-    collector.on("end", async () => {
-      await interaction.editReply({ components: [] });
-    });
-  } catch (error) {
-    console.error(error);
-    return interaction.reply({
-      content: "❌ An error occurred while processing your request.",
-      ephemeral: true,
-    });
-  }
-}
-
-async function restartGame(interaction, userId, bet) {
-  await interaction.editReply({ content: "🔄 Restarting game...", components: [] });
-  setTimeout(async () => {
-    await playWar(interaction, userId, bet);
-  }, 1000);
-}

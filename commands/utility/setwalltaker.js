@@ -1,41 +1,26 @@
-const { SlashCommandBuilder, PermissionFlagsBits } = require("discord.js");
-const { database } = require("../../utils/database");
+const {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  ChannelType,
+} = require("discord.js");
+const { database, ensureTableExists } = require("../../utils/database");
 
-async function ensureWalltakerTablesExist() {
-  try {
-    await database.execute(`
-      CREATE TABLE IF NOT EXISTS walltaker_settings (
-        guild_id VARCHAR(50) PRIMARY KEY,
-        feed_id VARCHAR(50) NOT NULL,
-        channel_id VARCHAR(50) NOT NULL
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-    `);
-
-    await database.execute(`
-      CREATE TABLE IF NOT EXISTS walltaker_history (
-        history_id INT AUTO_INCREMENT PRIMARY KEY,
-        guild_id VARCHAR(50) NOT NULL,
-        image_url TEXT NOT NULL,
-        posted_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        INDEX idx_guild_posted (guild_id, posted_at)
-      ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-    `);
-
-    console.log("✅ Walltaker tables (settings & history) ensured.");
-  } catch (error) {
-    console.error("❌ Error ensuring Walltaker tables exist:", error);
-  }
+async function ensureRequiredWalltakerTables() {
+  await ensureTableExists("walltaker_settings");
+  await ensureTableExists("walltaker_last_posted");
+  console.log(
+    "✅ Walltaker settings & last_posted tables ensured by setwalltaker command init."
+  );
 }
-
-ensureWalltakerTablesExist();
+ensureRequiredWalltakerTables();
 
 async function setWalltakerSettings(guildId, feedId, channelId) {
   try {
     await database.execute(
       `INSERT INTO walltaker_settings (guild_id, feed_id, channel_id)
-       VALUES (?, ?, ?)
-       ON DUPLICATE KEY UPDATE feed_id = VALUES(feed_id), channel_id = VALUES(channel_id);`,
-      [guildId, feedId, channelId]
+             VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE feed_id = VALUES(feed_id), channel_id = VALUES(channel_id);`,
+      [String(guildId).trim(), String(feedId).trim(), String(channelId).trim()]
     );
     return true;
   } catch (error) {
@@ -53,16 +38,20 @@ module.exports = {
     .addStringOption((option) =>
       option
         .setName("feed_id")
-        .setDescription("Enter the Walltaker Feed ID.")
+        .setDescription(
+          "Enter the Walltaker Feed ID (e.g., joi.how/links/YOUR_ID)."
+        )
         .setRequired(true)
     )
     .addChannelOption((option) =>
       option
         .setName("channel")
-        .setDescription("Select the channel to post images in.")
+        .setDescription("Select the text channel to post images in.")
         .setRequired(true)
+        .addChannelTypes(ChannelType.GuildText)
     )
-    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild),
+    .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+    .setDMPermission(false),
 
   async execute(interaction) {
     if (!interaction.guild) {
@@ -84,18 +73,26 @@ module.exports = {
     const channel = interaction.options.getChannel("channel");
     const guildId = interaction.guild.id;
 
-    if (!channel || !channel.isTextBased()) {
+    if (
+      !channel ||
+      !channel.isTextBased() ||
+      channel.type !== ChannelType.GuildText
+    ) {
       return interaction.reply({
         content: "❌ You must select a valid **text channel**.",
         ephemeral: true,
       });
     }
 
+    await ensureTableExists("walltaker_settings");
+    await ensureTableExists("walltaker_last_posted");
+
     const success = await setWalltakerSettings(guildId, feedId, channel.id);
 
     if (success) {
       await interaction.reply({
-        content: `✅ Walltaker settings updated!\n🔗 **Feed ID:** ${feedId}\n📢 **Channel:** ${channel}`,
+        content: `✅ Walltaker auto-posting updated!\n🔗 **Feed ID:** \`${feedId}\`\n📢 **Channel:** ${channel}`,
+        ephemeral: true,
       });
     } else {
       await interaction.reply({

@@ -5,16 +5,18 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  ComponentType,
   InteractionFlags,
 } = require("discord.js");
 const {
   getUserBalance,
   updateUserBalance,
   getUserStreak,
-  updateUserStreak,
+  updateStreak,
+  markUserActive,
 } = require("../../utils/database");
 
-const rouletteWheel = [
+const ROULETTE_WHEEL = [
   { number: 0, color: "green" },
   { number: 32, color: "red" },
   { number: 15, color: "black" },
@@ -54,12 +56,206 @@ const rouletteWheel = [
   { number: 26, color: "black" },
 ];
 
+const COLOR_EMOJIS = { red: "🔴", black: "⚫", green: "🟢" };
+
+async function playRouletteRound(
+  interaction,
+  betAmount,
+  betType,
+  chosenNumber,
+  isFollowUp = false
+) {
+  const userId = interaction.user.id;
+  try {
+    await markUserActive(userId);
+
+    const balanceData = await getUserBalance(userId);
+    if (!balanceData || betAmount > balanceData.balance) {
+      const replyOptions = {
+        content: `❌ You ${
+          isFollowUp ? "no longer " : ""
+        }have enough coins for this bet! (Need ${betAmount}, Have ${
+          balanceData?.balance ?? 0
+        })`,
+        ephemeral: true,
+      };
+      await (isFollowUp ? interaction.followUp : interaction.editReply)(
+        replyOptions
+      );
+      return;
+    }
+
+    const result =
+      ROULETTE_WHEEL[Math.floor(Math.random() * ROULETTE_WHEEL.length)];
+    const { number: winningNumber, color: winningColor } = result;
+
+    let won = false;
+    let payoutMultiplier = 0;
+
+    switch (betType) {
+      case "number":
+        if (chosenNumber === winningNumber) {
+          won = true;
+          payoutMultiplier = 35;
+        }
+        break;
+      case "red":
+      case "black":
+        if (winningColor === betType) {
+          won = true;
+          payoutMultiplier = 1;
+        }
+        break;
+      case "even":
+        if (winningNumber !== 0 && winningNumber % 2 === 0) {
+          won = true;
+          payoutMultiplier = 1;
+        }
+        break;
+      case "odd":
+        if (winningNumber % 2 !== 0) {
+          won = true;
+          payoutMultiplier = 1;
+        }
+        break;
+      case "high":
+        if (winningNumber >= 19 && winningNumber <= 36) {
+          won = true;
+          payoutMultiplier = 1;
+        }
+        break;
+      case "low":
+        if (winningNumber >= 1 && winningNumber <= 18) {
+          won = true;
+          payoutMultiplier = 1;
+        }
+        break;
+    }
+
+    const earnings = won ? betAmount * payoutMultiplier : -betAmount;
+
+    await updateUserBalance(userId, earnings, 0);
+    const streakResult = won ? "win" : "loss";
+    await updateStreak(userId, streakResult);
+    const finalStreak = await getUserStreak(userId);
+    const finalBalance = await getUserBalance(userId);
+
+    const betDescription =
+      betType === "number"
+        ? `Number ${chosenNumber}`
+        : betType.charAt(0).toUpperCase() + betType.slice(1);
+    const resultEmoji = COLOR_EMOJIS[winningColor] || "❔";
+
+    const embed = new EmbedBuilder()
+      .setTitle("🎰 Roulette Results")
+      .setDescription(
+        `The wheel landed on **${resultEmoji} ${winningNumber} (${winningColor})**!`
+      )
+      .setColor(won ? "Green" : "Red")
+      .addFields(
+        { name: "Your Bet", value: `\`${betDescription}\``, inline: true },
+        { name: "Bet Amount", value: `🪙 ${betAmount}`, inline: true },
+        { name: "\u200B", value: "\u200B", inline: true },
+        {
+          name: "Result",
+          value: won ? "✅ You won!" : "❌ You lost!",
+          inline: true,
+        },
+        {
+          name: "Payout",
+          value: `${earnings >= 0 ? "+" : ""}${earnings} coins`,
+          inline: true,
+        },
+        {
+          name: "Streak",
+          value:
+            finalStreak > 0
+              ? `🔥 ${finalStreak}-win`
+              : finalStreak < 0
+              ? `❄️ ${Math.abs(finalStreak)}-loss`
+              : "😐 None",
+          inline: true,
+        },
+        {
+          name: "📊 New Balance",
+          value: `🪙 ${finalBalance.balance}`,
+          inline: false,
+        }
+      )
+      .setTimestamp();
+
+    const playAgainButton = new ButtonBuilder()
+      .setCustomId(`roulette_play_again_${interaction.id}`)
+      .setLabel("Spin Again (Same Bet)")
+      .setStyle(ButtonStyle.Success);
+    const row = new ActionRowBuilder().addComponents(playAgainButton);
+
+    const replyOptions = {
+      embeds: [embed],
+      components: [row],
+      fetchReply: true,
+    };
+    let message;
+    if (isFollowUp && interaction.isMessageComponent()) {
+      message = await interaction.editReply(replyOptions);
+    } else if (
+      !isFollowUp &&
+      interaction.isChatInputCommand() &&
+      (interaction.replied || interaction.deferred)
+    ) {
+      message = await interaction.editReply(replyOptions);
+    } else {
+      message = await interaction.reply(replyOptions);
+    }
+
+    const filter = (i) =>
+      i.user.id === userId &&
+      i.customId === `roulette_play_again_${interaction.id}` &&
+      i.message.id === message.id;
+    const collector = message.createMessageComponentCollector({
+      componentType: ComponentType.Button,
+      filter,
+      time: 30000,
+      max: 1,
+    });
+
+    collector.on("collect", async (i) => {
+      await i.deferUpdate();
+      await playRouletteRound(i, betAmount, betType, chosenNumber, true);
+    });
+
+    collector.on("end", async (collected, reason) => {});
+  } catch (error) {
+    console.error("Error during playRouletteRound:", error);
+    const errorContent = "❌ An error occurred during the Roulette game.";
+    try {
+      if (isFollowUp && interaction.isMessageComponent())
+        await interaction.followUp({ content: errorContent, ephemeral: true });
+      else if (
+        !isFollowUp &&
+        interaction.isChatInputCommand() &&
+        (interaction.replied || interaction.deferred)
+      )
+        await interaction.editReply({
+          content: errorContent,
+          embeds: [],
+          components: [],
+        });
+      else await interaction.reply({ content: errorContent, ephemeral: true });
+    } catch {}
+  }
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName("roulette")
     .setDescription("🎰 Play a game of roulette!")
     .addIntegerOption((option) =>
-      option.setName("bet").setDescription("Amount to bet").setRequired(true)
+      option
+        .setName("bet")
+        .setDescription("Amount to bet")
+        .setRequired(true)
+        .setMinValue(10)
     )
     .addStringOption((option) =>
       option
@@ -67,183 +263,67 @@ module.exports = {
         .setDescription("Choose your bet type")
         .setRequired(true)
         .addChoices(
-          { name: "🎯 Number", value: "number" },
-          { name: "🔴 Red", value: "red" },
-          { name: "⚫ Black", value: "black" },
-          { name: "🔢 Even", value: "even" },
-          { name: "🔢 Odd", value: "odd" },
-          { name: "⬆️ High (19-36)", value: "high" },
-          { name: "⬇️ Low (1-18)", value: "low" }
+          { name: "🎯 Number (Pays 35:1)", value: "number" },
+          { name: "🔴 Red (Pays 1:1)", value: "red" },
+          { name: "⚫ Black (Pays 1:1)", value: "black" },
+          { name: "🔢 Even (Pays 1:1)", value: "even" },
+          { name: "🔢 Odd (Pays 1:1)", value: "odd" },
+          { name: "⬆️ High (19-36) (Pays 1:1)", value: "high" },
+          { name: "⬇️ Low (1-18) (Pays 1:1)", value: "low" }
         )
     )
     .addIntegerOption((option) =>
       option
         .setName("number")
-        .setDescription("Pick a number (0-36) if betting on a number")
+        .setDescription("Pick a number (0-36) if betting on 'Number'")
         .setMinValue(0)
         .setMaxValue(36)
+        .setRequired(false)
     ),
 
   modulePath: path.resolve(__filename),
 
   async execute(interaction) {
-    try {
-      console.log(`⚡ Executing /roulette from: ${module.exports.modulePath}`);
+    await interaction.deferReply();
 
-      const userId = interaction.user.id;
-      const betAmount = interaction.options.getInteger("bet");
-      const betType = interaction.options.getString("bet_type");
-      const chosenNumber = interaction.options.getInteger("number");
+    const betAmount = interaction.options.getInteger("bet");
+    const betType = interaction.options.getString("bet_type");
+    const chosenNumber = interaction.options.getInteger("number");
 
-      const balance = await getUserBalance(userId);
-      if (!balance || betAmount <= 0 || betAmount > balance.balance) {
-        return interaction.reply({
-          content: "❌ Invalid bet amount or insufficient balance!",
-          flags: InteractionFlags.EPHEMERAL,
-        });
-      }
-
-      if (betType === "number" && chosenNumber === null) {
-        return interaction.reply({
-          content: "❌ You must pick a valid number between 0 and 36!",
-          flags: InteractionFlags.EPHEMERAL,
-        });
-      }
-
-      const result =
-        rouletteWheel[Math.floor(Math.random() * rouletteWheel.length)];
-      const { number, color } = result;
-
-      let won = false;
-      let winnings = 0;
-
-      switch (betType) {
-        case "number":
-          if (chosenNumber === number) {
-            won = true;
-            winnings = betAmount * 35;
-          }
-          break;
-        case "red":
-        case "black":
-          if (color === betType) {
-            won = true;
-            winnings = betAmount * 2;
-          }
-          break;
-        case "even":
-          if (number !== 0 && number % 2 === 0) {
-            won = true;
-            winnings = betAmount * 2;
-          }
-          break;
-        case "odd":
-          if (number % 2 !== 0) {
-            won = true;
-            winnings = betAmount * 2;
-          }
-          break;
-        case "high":
-          if (number >= 19 && number <= 36) {
-            won = true;
-            winnings = betAmount * 2;
-          }
-          break;
-        case "low":
-          if (number >= 1 && number <= 18) {
-            won = true;
-            winnings = betAmount * 2;
-          }
-          break;
-      }
-
-      try {
-        await updateUserBalance(userId, won ? winnings : -betAmount, 0);
-      } catch (error) {
-        console.error("Error updating user balance:", error);
-        return interaction.reply({
-          content: "❌ An error occurred while updating your balance. Please try again later.",
-          flags: InteractionFlags.EPHEMERAL,
-        });
-      }
-
-      const streak = await getUserStreak(userId);
-      const newStreak = won
-        ? streak >= 0
-          ? streak + 1
-          : 1
-        : streak <= 0
-        ? streak - 1
-        : -1;
-      await updateUserStreak(userId, newStreak);
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎰 Roulette Results")
-        .setDescription(
-          `The wheel landed on **${number} (${color.toUpperCase()})**!`
-        )
-        .addFields(
-          {
-            name: "Your Bet",
-            value: `${betType} → **${chosenNumber ?? "N/A"}**`,
-            inline: true,
-          },
-          {
-            name: "Result",
-            value: won ? "✅ You won!" : "❌ You lost!",
-            inline: true,
-          },
-          {
-            name: "Payout",
-            value: won ? `+${winnings} coins` : `-${betAmount} coins`,
-            inline: true,
-          },
-          {
-            name: "Streak",
-            value:
-              newStreak > 0
-                ? `🔥 **${newStreak}-win streak!**`
-                : newStreak < 0
-                ? `❄️ **${Math.abs(newStreak)}-loss streak!**`
-                : "😐 No streak",
-            inline: false,
-          }
-        )
-        .setColor(won ? "Green" : "Red");
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("play_again")
-          .setLabel("🔄 Play Again")
-          .setStyle(ButtonStyle.Success)
-      );
-
-      const message = await interaction.reply({
-        embeds: [embed],
-        components: [row],
-        fetchReply: true,
-      });
-
-      const collector = message.createMessageComponentCollector({
-        filter: (i) => i.user.id === userId && i.customId === "play_again",
-        time: 30000,
-      });
-
-      collector.on("collect", async (i) => {
-        await i.deferUpdate();
-        collector.stop();
-        await this.execute(i);
-      });
-
-      collector.on("end", async () => {
-        await interaction.editReply({ components: [] });
-      });
-    } catch (error) {
-      console.error("Error executing /roulette command:", error);
-      await interaction.reply({
-        content: "❌ An error occurred while executing the command.",
-        flags: InteractionFlags.EPHEMERAL,
+    if (
+      betType === "number" &&
+      (chosenNumber === null || chosenNumber < 0 || chosenNumber > 36)
+    ) {
+      return interaction.editReply({
+        content:
+          "❌ You must provide a valid number (0-36) when betting on 'Number'.",
+        ephemeral: true,
       });
     }
+    if (betType !== "number" && chosenNumber !== null) {
+      await interaction.followUp({
+        content:
+          "ℹ️ You selected a bet type other than 'Number', so the chosen number will be ignored.",
+        ephemeral: true,
+      });
+    }
+
+    const initialBalance = await getUserBalance(interaction.user.id);
+    if (!initialBalance || betAmount > initialBalance.balance) {
+      return interaction.editReply({
+        content: `❌ Insufficient funds! (Need ${betAmount}, Have ${
+          initialBalance?.balance ?? 0
+        })`,
+        ephemeral: true,
+      });
+    }
+
+    await playRouletteRound(
+      interaction,
+      betAmount,
+      betType,
+      chosenNumber,
+      false
+    );
   },
 };

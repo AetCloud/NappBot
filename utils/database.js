@@ -84,8 +84,21 @@ const TABLE_DEFS = {
             installed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
     `,
+  walltaker_settings: `
+        CREATE TABLE IF NOT EXISTS walltaker_settings (
+            guild_id VARCHAR(50) PRIMARY KEY,
+            feed_id VARCHAR(50) NOT NULL,
+            channel_id VARCHAR(50) NOT NULL
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+    `,
+  walltaker_last_posted: `
+        CREATE TABLE IF NOT EXISTS walltaker_last_posted (
+            guild_id VARCHAR(50) PRIMARY KEY NOT NULL,
+            image_url TEXT NULL,
+            last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+    `,
 };
-
 
 async function executeQuery(query, params = []) {
   if (!databasePool) {
@@ -116,6 +129,7 @@ async function ensureTableExists(tableName) {
   }
   try {
     await executeQuery(query);
+    console.log(`✅ Table ensured: ${tableName}`);
     checkedTables.add(tableName);
   } catch (error) {
     console.error(`❌ Failed to ensure table exists: ${tableName}`, error);
@@ -123,61 +137,61 @@ async function ensureTableExists(tableName) {
 }
 
 async function getUserPreference(userId) {
+  if (!userId) return null;
   await ensureTableExists("user_preferences");
   const rows = await executeQuery(
     "SELECT preference FROM user_preferences WHERE user_id = ?",
-    [userId.trim()]
+    [String(userId).trim()]
   );
   return rows?.length ? rows[0].preference : null;
 }
 
 async function setUserPreference(userId, preference) {
-  if (!["male", "female", "random"].includes(preference)) return false;
+  if (!userId || !["male", "female", "random"].includes(preference))
+    return false;
   await ensureTableExists("user_preferences");
   return !!(await executeQuery(
     "INSERT INTO user_preferences (user_id, preference) VALUES (?, ?) ON DUPLICATE KEY UPDATE preference = ?",
-    [userId.trim(), preference, preference]
+    [String(userId).trim(), preference, preference]
   ));
 }
 
 async function ensureUserRowExists(userId) {
+  if (!userId) return;
   await ensureTableExists("users");
-  const rows = await executeQuery(
-    "SELECT user_id FROM users WHERE user_id = ?",
-    [userId]
+  await executeQuery(
+    "INSERT IGNORE INTO users (user_id, balance, bank_balance, streak, last_work, last_interest, active_last) VALUES (?, ?, ?, 0, NULL, NULL, NOW())",
+    [String(userId).trim(), 5000, 0]
   );
-  if (!rows || rows.length === 0) {
-    await executeQuery(
-      "INSERT INTO users (user_id, balance, bank_balance, streak, last_work, last_interest, active_last) VALUES (?, ?, ?, 0, NULL, NULL, NOW())",
-      [userId, 5000, 0]
-    );
-  }
 }
 
 async function getUserLastWork(userId) {
-  await ensureUserRowExists(userId);
+  if (!userId) return null;
+  await ensureUserRowExists(String(userId).trim());
   const rows = await executeQuery(
     "SELECT last_work FROM users WHERE user_id = ?",
-    [userId]
+    [String(userId).trim()]
   );
   return rows?.length ? rows[0].last_work : null;
 }
 
 async function updateUserLastWork(userId) {
-  await ensureUserRowExists(userId);
-  await executeQuery(
+  if (!userId) return false;
+  await ensureUserRowExists(String(userId).trim());
+  return !!(await executeQuery(
     "UPDATE users SET last_work = NOW(), active_last = NOW() WHERE user_id = ?",
-    [userId]
-  );
+    [String(userId).trim()]
+  ));
 }
 
 async function getUserBalance(userId) {
-  await ensureUserRowExists(userId);
+  if (!userId) return { balance: 0, bank_balance: 0, streak: 0 };
+  await ensureUserRowExists(String(userId).trim());
   const rows = await executeQuery(
     "SELECT balance, bank_balance, streak FROM users WHERE user_id = ?",
-    [userId]
+    [String(userId).trim()]
   );
-  return rows[0];
+  return rows?.[0] ?? { balance: 0, bank_balance: 0, streak: 0 };
 }
 
 async function updateUserBalance(userId, walletChange = 0, bankChange = 0) {
@@ -185,20 +199,23 @@ async function updateUserBalance(userId, walletChange = 0, bankChange = 0) {
     console.error("❌ updateUserBalance Error: userId is undefined or null.");
     return false;
   }
-  await ensureUserRowExists(userId);
+  await ensureUserRowExists(String(userId).trim());
   return !!(await executeQuery(
     `UPDATE users
-     SET balance = balance + ?, bank_balance = bank_balance + ?, active_last = NOW()
+     SET balance = GREATEST(0, CAST(balance AS SIGNED) + CAST(? AS SIGNED)),
+         bank_balance = GREATEST(0, CAST(bank_balance AS SIGNED) + CAST(? AS SIGNED)),
+         active_last = NOW()
      WHERE user_id = ?`,
-    [walletChange, bankChange, userId]
+    [walletChange, bankChange, String(userId).trim()]
   ));
 }
 
 async function getUserStreak(userId) {
-  await ensureUserRowExists(userId);
+  if (!userId) return 0;
+  await ensureUserRowExists(String(userId).trim());
   const rows = await executeQuery(
     "SELECT streak FROM users WHERE user_id = ?",
-    [userId]
+    [String(userId).trim()]
   );
   return rows?.[0]?.streak ?? 0;
 }
@@ -210,28 +227,28 @@ async function updateStreak(userId, result) {
     );
     return false;
   }
-  await ensureUserRowExists(userId);
+  await ensureUserRowExists(String(userId).trim());
 
-  const currentStreak = await getUserStreak(userId);
-
-  let newStreak;
-  if (result === "win") {
-    newStreak = currentStreak >= 0 ? currentStreak + 1 : 1;
-  } else {
-    newStreak = currentStreak <= 0 ? currentStreak - 1 : -1;
-  }
-
-  return !!(await executeQuery(
-    "UPDATE users SET streak = ?, active_last = NOW() WHERE user_id = ?",
-    [newStreak, userId]
-  ));
+  const query = `
+        UPDATE users
+        SET streak = CASE
+            WHEN ? = 'win' THEN IF(streak >= 0, streak + 1, 1)
+            WHEN ? = 'loss' THEN IF(streak <= 0, streak - 1, -1)
+            ELSE streak -- Should not happen with input validation
+        END,
+        active_last = NOW()
+        WHERE user_id = ?
+    `;
+  return !!(await executeQuery(query, [result, result, String(userId).trim()]));
 }
 
 async function markUserActive(userId) {
-  await ensureUserRowExists(userId);
-  await executeQuery("UPDATE users SET active_last = NOW() WHERE user_id = ?", [
-    userId,
-  ]);
+  if (!userId) return false;
+  await ensureUserRowExists(String(userId).trim());
+  return !!(await executeQuery(
+    "UPDATE users SET active_last = NOW() WHERE user_id = ?",
+    [String(userId).trim()]
+  ));
 }
 
 async function storeUserInstallation(
@@ -239,38 +256,58 @@ async function storeUserInstallation(
   accessTokenHash,
   refreshTokenHash
 ) {
+  if (!userId || !accessTokenHash || !refreshTokenHash) return false;
   await ensureTableExists("user_installations");
   try {
-    await executeQuery(
+    return !!(await executeQuery(
       `INSERT INTO user_installations (user_id, access_token_hash, refresh_token_hash)
              VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE access_token_hash = VALUES(access_token_hash), refresh_token_hash = VALUES(refresh_token_hash), installed_at = NOW()`,
-      [userId, accessTokenHash, refreshTokenHash]
-    );
-    return true;
+      [String(userId).trim(), accessTokenHash, refreshTokenHash]
+    ));
   } catch (error) {
     console.error(`❌ Failed to store installation for user ${userId}:`, error);
     return false;
   }
 }
 
+async function getLastPostedImage(guildId) {
+  if (!guildId) return null;
+  await ensureTableExists("walltaker_last_posted");
+  const rows = await executeQuery(
+    "SELECT image_url FROM walltaker_last_posted WHERE guild_id = ?",
+    [String(guildId).trim()]
+  );
+  return rows?.[0]?.image_url || null;
+}
+
+async function saveLastPostedImage(guildId, imageUrl) {
+  if (!guildId || typeof imageUrl !== "string") return false;
+  await ensureTableExists("walltaker_last_posted");
+  return !!(await executeQuery(
+    `INSERT INTO walltaker_last_posted (guild_id, image_url, last_updated)
+     VALUES (?, ?, NOW())
+     ON DUPLICATE KEY UPDATE image_url = VALUES(image_url), last_updated = NOW()`,
+    [String(guildId).trim(), imageUrl.trim()]
+  ));
+}
 
 async function getMewbotConfig(guildId) {
   if (!guildId) return null;
   await ensureTableExists("mewbot_config");
   const rows = await executeQuery(
     "SELECT watch_mode, watch_channel_id, output_channel_id, mewbot_user_id, enabled FROM mewbot_config WHERE guild_id = ?",
-    [guildId]
+    [String(guildId).trim()]
   );
-  return rows?.length
-    ? rows[0]
-    : {
-        enabled: false,
-        watch_mode: "specific",
-        watch_channel_id: null,
-        output_channel_id: null,
-        mewbot_user_id: null,
-      };
+  return (
+    rows?.[0] ?? {
+      enabled: false,
+      watch_mode: "specific",
+      watch_channel_id: null,
+      output_channel_id: null,
+      mewbot_user_id: null,
+    }
+  );
 }
 
 async function setMewbotWatchConfig(
@@ -281,37 +318,31 @@ async function setMewbotWatchConfig(
 ) {
   if (!guildId || !["all", "specific"].includes(mode)) return false;
   await ensureTableExists("mewbot_config");
-  const watchChannel = mode === "specific" && channelId ? channelId : null;
-  const mewbotIdToSet = mewbotUserId ? mewbotUserId : null;
+  const watchChannel =
+    mode === "specific" && channelId ? String(channelId).trim() : null;
+  const mewbotIdToSet = mewbotUserId ? String(mewbotUserId).trim() : null;
 
   return !!(await executeQuery(
     `INSERT INTO mewbot_config (guild_id, watch_mode, watch_channel_id, mewbot_user_id, enabled)
-     VALUES (?, ?, ?, ?, TRUE)
-     ON DUPLICATE KEY UPDATE watch_mode = VALUES(watch_mode), watch_channel_id = VALUES(watch_channel_id), mewbot_user_id = COALESCE(?, mewbot_user_id), enabled = TRUE`,
-    [guildId, mode, watchChannel, mewbotIdToSet, mewbotIdToSet]
+         VALUES (?, ?, ?, ?, TRUE)
+         ON DUPLICATE KEY UPDATE
+            watch_mode = VALUES(watch_mode),
+            watch_channel_id = VALUES(watch_channel_id),
+            mewbot_user_id = COALESCE(?, mewbot_user_id), -- Only update mewbot ID if provided
+            enabled = TRUE`,
+    [String(guildId).trim(), mode, watchChannel, mewbotIdToSet, mewbotIdToSet]
   ));
 }
 
 async function setMewbotOutputChannel(guildId, channelId) {
   if (!guildId) return false;
   await ensureTableExists("mewbot_config");
-  const outputChannel = channelId ? channelId : null;
+  const outputChannel = channelId ? String(channelId).trim() : null;
   return !!(await executeQuery(
     `INSERT INTO mewbot_config (guild_id, output_channel_id, enabled)
-     VALUES (?, ?, TRUE)
-     ON DUPLICATE KEY UPDATE output_channel_id = VALUES(output_channel_id), enabled = TRUE`,
-    [guildId, outputChannel]
-  ));
-}
-
-async function setMewbotUserId(guildId, mewbotUserId) {
-  if (!guildId || !mewbotUserId) return false;
-  await ensureTableExists("mewbot_config");
-  return !!(await executeQuery(
-    `INSERT INTO mewbot_config (guild_id, mewbot_user_id, enabled)
          VALUES (?, ?, TRUE)
-         ON DUPLICATE KEY UPDATE mewbot_user_id = VALUES(mewbot_user_id), enabled = TRUE`,
-    [guildId, mewbotUserId]
+         ON DUPLICATE KEY UPDATE output_channel_id = VALUES(output_channel_id), enabled = TRUE`,
+    [String(guildId).trim(), outputChannel]
   ));
 }
 
@@ -320,7 +351,7 @@ async function disableMewbotHelper(guildId) {
   await ensureTableExists("mewbot_config");
   const result = await executeQuery(
     "UPDATE mewbot_config SET enabled = FALSE WHERE guild_id = ?",
-    [guildId]
+    [String(guildId).trim()]
   );
   return result && result.affectedRows > 0;
 }
@@ -334,8 +365,10 @@ module.exports = {
   database: databasePool,
   executeQuery,
   ensureTableExists,
+
   getUserPreference,
   setUserPreference,
+
   ensureUserRowExists,
   getUserBalance,
   updateUserBalance,
@@ -344,10 +377,14 @@ module.exports = {
   getUserLastWork,
   updateUserLastWork,
   markUserActive,
+
   storeUserInstallation,
+
+  getLastPostedImage,
+  saveLastPostedImage,
+
   getMewbotConfig,
   setMewbotWatchConfig,
   setMewbotOutputChannel,
-  setMewbotUserId,
   disableMewbotHelper,
 };
