@@ -1,19 +1,227 @@
-const path = require("path");
-const {
+import path from "path";
+import {
   SlashCommandBuilder,
   EmbedBuilder,
   ButtonBuilder,
   ActionRowBuilder,
   ButtonStyle,
   InteractionFlags,
-} = require("discord.js");
-const {
+} from "discord.js";
+import {
   getUserBalance,
   updateUserBalance,
   getUserStreak,
   updateStreak,
   markUserActive,
-} = require("../../utils/database");
+} from "../../utils/database";
+
+const SUITS = ["♠", "♥", "♦", "♣"];
+const RANKS = [
+  "A",
+  "2",
+  "3",
+  "4",
+  "5",
+  "6",
+  "7",
+  "8",
+  "9",
+  "10",
+  "J",
+  "Q",
+  "K",
+];
+
+function generateDeck() {
+  return SUITS.flatMap((suit) =>
+    RANKS.map((rank) => ({
+      suit,
+      rank,
+      value: rank === "A" ? 11 : isNaN(rank) ? 10 : parseInt(rank),
+    }))
+  );
+}
+
+function drawCard(deck) {
+  if (deck.length === 0) {
+    console.warn("Deck is empty, cannot draw card.");
+    return null;
+  }
+  const index = Math.floor(Math.random() * deck.length);
+  return deck.splice(index, 1)[0];
+}
+
+function calculateHandValue(hand) {
+  if (!Array.isArray(hand) || hand.some((card) => !card)) return 0;
+  let value = hand.reduce((sum, card) => sum + card.value, 0);
+  let aces = hand.filter((card) => card.rank === "A").length;
+  while (value > 21 && aces > 0) {
+    value -= 10;
+    aces--;
+  }
+  return value;
+}
+
+function formatHand(hand) {
+  if (!Array.isArray(hand) || hand.some((card) => !card)) return "Invalid Hand";
+  return hand.map((card) => `${card.rank}${card.suit}`).join(" ");
+}
+
+function getHandStrengthTip(total) {
+  if (total <= 11)
+    return "Low total. Consider hitting unless the dealer shows a bust card.";
+  if (total >= 12 && total <= 16)
+    return "Risky zone. Consider standing if the dealer shows a weak card (2-6), otherwise hit.";
+  if (total >= 17 && total <= 20)
+    return "Strong hand. Standing is generally recommended.";
+  if (total === 21) return "Blackjack! The best possible hand.";
+  return "Bust! Your hand is over 21.";
+}
+
+async function determineAndEndGame(
+  interaction,
+  userId,
+  playerHand,
+  dealerHand,
+  deck,
+  bet,
+  initialStreak
+) {
+  let playerTotal = calculateHandValue(playerHand);
+  let dealerTotal = calculateHandValue(dealerHand);
+
+  while (dealerTotal < 17) {
+    const newCard = drawCard(deck);
+    if (newCard) {
+      dealerHand.push(newCard);
+      dealerTotal = calculateHandValue(dealerHand);
+    } else {
+      console.warn("Dealer couldn't draw card, deck empty.");
+      break;
+    }
+  }
+
+  let resultText;
+  let resultOutcome;
+  let color;
+  let earnings = 0;
+
+  if (playerTotal > 21) {
+    resultText = "busted and lost 💀";
+    resultOutcome = "loss";
+    color = "Red";
+    earnings = -bet;
+  } else if (dealerTotal > 21 || playerTotal > dealerTotal) {
+    resultText = "won 🎉";
+    resultOutcome = "win";
+    color = "Green";
+    earnings = bet;
+  } else if (dealerTotal === playerTotal) {
+    resultText = "pushed 🤝";
+    resultOutcome = "push";
+    color = "#808080";
+    earnings = 0;
+  } else {
+    resultText = "lost 💀";
+    resultOutcome = "loss";
+    color = "Red";
+    earnings = -bet;
+  }
+
+  let finalStreak = initialStreak;
+  if (resultOutcome !== "push") {
+    await updateStreak(userId, resultOutcome);
+    finalStreak = await getUserStreak(userId);
+    await updateUserBalance(userId, earnings, 0);
+  }
+
+  const handStrengthTip = getHandStrengthTip(playerTotal);
+
+  const embed = new EmbedBuilder()
+    .setTitle("🃏 Blackjack Result")
+    .setDescription(
+      `**Dealer's Hand:** ${formatHand(dealerHand)} (**${dealerTotal}**)\n` +
+        `**Your Hand:** ${formatHand(playerHand)} (**${playerTotal}**)\n\n` +
+        `You **${resultText}**!\n` +
+        (earnings !== 0
+          ? `💰 **Payout:** ${earnings > 0 ? "+" : ""}${earnings} coins\n`
+          : "💰 **Payout:** 0 coins\n") +
+        `🔥 **Streak:** ${finalStreak}\n\n` +
+        `**Tip:** ${handStrengthTip}`
+    )
+    .setColor(color)
+    .setFooter({ text: `Bet: ${bet} coins` });
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("play_again_blackjack")
+      .setLabel("Play Again")
+      .setStyle(ButtonStyle.Success)
+  );
+
+  try {
+    if (interaction.isMessageComponent()) {
+      await interaction.update({ embeds: [embed], components: [row] });
+    } else {
+      await interaction.editReply({ embeds: [embed], components: [row] });
+    }
+  } catch (error) {
+    console.error("Failed to edit reply with final results:", error);
+    try {
+      await interaction.followUp({
+        embeds: [embed],
+        components: [row],
+        ephemeral: true,
+      });
+    } catch (followUpError) {
+      console.error("Failed to follow up with final results:", followUpError);
+    }
+  }
+}
+
+function createGameEmbed(playerHand, dealerHand, showDealerCard = false) {
+  const playerTotal = calculateHandValue(playerHand);
+  const dealerVisibleCard = dealerHand[0]
+    ? `${dealerHand[0].rank}${dealerHand[0].suit}`
+    : "?";
+  const dealerText = showDealerCard
+    ? `${formatHand(dealerHand)} (**${calculateHandValue(dealerHand)}**)`
+    : `${dealerVisibleCard} ?`;
+
+  return new EmbedBuilder()
+    .setTitle("🃏 Blackjack")
+    .setColor(playerTotal > 21 ? "Red" : "Blue")
+    .addFields(
+      {
+        name: "Your Hand",
+        value: `${formatHand(playerHand)} (**${playerTotal}**)`,
+        inline: true,
+      },
+      { name: "Dealer's Hand", value: dealerText, inline: true }
+    )
+    .setFooter({
+      text: `Use buttons to play. Tip: ${getHandStrengthTip(playerTotal)}`,
+    });
+}
+
+function createActionRow(playerTotal, canDouble, bet) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("hit_blackjack")
+      .setLabel("Hit")
+      .setStyle(ButtonStyle.Primary)
+      .setDisabled(playerTotal >= 21),
+    new ButtonBuilder()
+      .setCustomId("stand_blackjack")
+      .setLabel("Stand")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("double_blackjack")
+      .setLabel(`Double (${bet * 2})`)
+      .setStyle(ButtonStyle.Danger)
+      .setDisabled(!canDouble || playerTotal >= 21)
+  );
+}
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -30,321 +238,208 @@ module.exports = {
   modulePath: path.resolve(__filename),
 
   async execute(interaction) {
+    await interaction.deferReply();
+
     try {
       console.log(`⚡ Executing /blackjack from: ${module.exports.modulePath}`);
 
       const userId = interaction.user.id;
-      let bet = interaction.options.getInteger("bet");
-      let balanceData = await getUserBalance(userId);
-      let streakData = await getUserStreak(userId);
+      const initialBet = interaction.options.getInteger("bet");
+      let currentBet = initialBet;
 
-      if (!balanceData || bet > balanceData.balance) {
-        return interaction.reply({
-          content: "❌ You don't have enough coins!",
+      const balanceData = await getUserBalance(userId);
+      const initialStreak = await getUserStreak(userId);
+
+      if (!balanceData || initialBet > balanceData.balance) {
+        return interaction.editReply({
+          content: "❌ You don't have enough coins for this bet!",
           flags: InteractionFlags.EPHEMERAL,
         });
       }
 
+      await updateUserBalance(userId, -initialBet, 0);
+      let currentBalance = balanceData.balance - initialBet;
+
       await markUserActive(userId);
 
       const deck = generateDeck();
-      let playerHand = [drawCard(deck), drawCard(deck)];
-      let dealerHand = [drawCard(deck), drawCard(deck)];
+      let playerHand = [];
+      let dealerHand = [];
 
-      function generateDeck() {
-        const suits = ["♠", "♥", "♦", "♣"];
-        const ranks = [
-          "A",
-          "2",
-          "3",
-          "4",
-          "5",
-          "6",
-          "7",
-          "8",
-          "9",
-          "10",
-          "J",
-          "Q",
-          "K",
-        ];
-        return suits.flatMap((suit) =>
-          ranks.map((rank) => ({
-            suit,
-            rank,
-            value: rank === "A" ? 11 : isNaN(rank) ? 10 : parseInt(rank),
-          }))
+      playerHand.push(drawCard(deck));
+      dealerHand.push(drawCard(deck));
+      playerHand.push(drawCard(deck));
+      dealerHand.push(drawCard(deck));
+
+      let playerTotal = calculateHandValue(playerHand);
+      let canDouble = true;
+
+      if (playerTotal === 21) {
+        await determineAndEndGame(
+          interaction,
+          userId,
+          playerHand,
+          dealerHand,
+          deck,
+          currentBet,
+          initialStreak
         );
+        return;
       }
 
-      function drawCard(deck) {
-        return deck.splice(Math.floor(Math.random() * deck.length), 1)[0];
-      }
+      const initialEmbed = createGameEmbed(playerHand, dealerHand);
+      const initialActions = createActionRow(
+        playerTotal,
+        canDouble && currentBalance >= initialBet,
+        currentBet
+      );
 
-      function calculateHandValue(hand) {
-        let value = hand.reduce((sum, card) => sum + card.value, 0);
-        let aces = hand.filter((card) => card.rank === "A").length;
-        while (value > 21 && aces > 0) {
-          value -= 10;
-          aces--;
-        }
-        return value;
-      }
-
-      function formatHand(hand) {
-        return hand.map((card) => `${card.rank}${card.suit}`).join(" ");
-      }
-
-      async function dealerTurn() {
-        let dealerTotal = calculateHandValue(dealerHand);
-        while (dealerTotal < 17) {
-          dealerHand.push(drawCard(deck));
-          dealerTotal = calculateHandValue(dealerHand);
-        }
-
-        let playerTotal = calculateHandValue(playerHand);
-        let result;
-        let color;
-        let earnings = 0;
-
-        if (dealerTotal > 21 || playerTotal > dealerTotal) {
-          result = "won 🎉";
-          color = "Green";
-          earnings = bet;
-          await updateStreak(userId, "win");
-        } else if (dealerTotal === playerTotal) {
-          result = "pushed 🤝";
-          color = "#808080";
-          earnings = 0;
-        } else {
-          result = "lost 💀";
-          color = "Red";
-          earnings = -bet;
-          await updateStreak(userId, "loss");
-        }
-
-        await updateUserBalance(userId, earnings, 0);
-
-        let handStrengthTip = getHandStrengthTip(playerTotal);
-
-        let embed = new EmbedBuilder()
-          .setTitle("🃏 Blackjack Result")
-          .setDescription(
-            `**Dealer's Hand:** ${formatHand(
-              dealerHand
-            )} (${dealerTotal})\n\n` +
-              `**Your Hand:** ${formatHand(playerHand)} (${playerTotal})\n\n` +
-              `**You ${result}!**\n` +
-              (earnings !== 0
-                ? `💰 **Earnings:** ${
-                    earnings > 0 ? "+" : ""
-                  }${earnings} coins\n`
-                : "") +
-              `🔥 **Streak:** ${await getUserStreak(userId)}\n\n` +
-              `**Tip:** ${handStrengthTip}`
-          )
-          .setColor(color);
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("play_again")
-            .setLabel("Play Again")
-            .setStyle(ButtonStyle.Success)
-        );
-
-        await interaction.editReply({ embeds: [embed], components: [row] });
-      }
-
-      function getHandStrengthTip(total) {
-        if (total <= 11) {
-          return "Your hand is weak. Consider hitting.";
-        } else if (total >= 12 && total <= 16) {
-          return "Your hand is moderate. Be cautious.";
-        } else if (total >= 17 && total <= 20) {
-          return "Your hand is strong. Consider standing.";
-        } else if (total === 21) {
-          return "Blackjack! You have the best hand.";
-        } else {
-          return "Your hand is over 21. You have busted.";
-        }
-      }
-
-      let initialEmbed = new EmbedBuilder()
-        .setTitle("🃏 Blackjack")
-        .setDescription("🃏 Dealing cards...");
-
-      await interaction.reply({
+      const message = await interaction.editReply({
         embeds: [initialEmbed],
-        components: [],
+        components: [initialActions],
       });
 
-      const message = await interaction.fetchReply();
-
-      async function updateGame(interactionToUpdate) {
-        let playerTotal = calculateHandValue(playerHand);
-        if (playerTotal > 21) return dealerTurn();
-        if (playerTotal === 21) {
-          collector.stop();
-          return dealerTurn();
-        }
-
-        let embed = new EmbedBuilder()
-          .setTitle("🃏 Blackjack")
-          .setDescription(
-            `**Your Hand:** ${formatHand(playerHand)} (${playerTotal})\n` +
-              `**Dealer's Hand:** ${dealerHand[0].rank}${dealerHand[0].suit} ?\n`
-          )
-          .setColor("Blue");
-
-        const row = new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("hit")
-            .setLabel("Hit")
-            .setStyle(ButtonStyle.Primary)
-            .setDisabled(playerTotal >= 21),
-          new ButtonBuilder()
-            .setCustomId("stand")
-            .setLabel("Stand")
-            .setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder()
-            .setCustomId("double")
-            .setLabel("Double Down")
-            .setStyle(ButtonStyle.Danger)
-            .setDisabled(bet * 2 > balanceData.balance || playerTotal >= 21),
-          new ButtonBuilder()
-            .setCustomId("split")
-            .setLabel("Split")
-            .setStyle(ButtonStyle.Success)
-            .setDisabled(
-              playerHand.length !== 2 ||
-                playerHand[0].rank !== playerHand[1].rank
-            )
-        );
-
-        if (interactionToUpdate.isMessageComponent()) {
-          await interactionToUpdate.update({
-            embeds: [embed],
-            components: [row],
-          });
-        } else {
-          await interactionToUpdate.editReply({
-            embeds: [embed],
-            components: [row],
-          });
-        }
-      }
-
-      async function restartGame(interaction) {
-        await interaction.update({
-          content: "🔄 Restarting game...",
-          components: [],
-        });
-        setTimeout(async () => {
-          await module.exports.execute(interaction);
-        }, 1000);
-      }
-
-      const filter = (i) => i.isButton() && i.user.id === userId;
+      const filter = (i) =>
+        i.isButton() && i.user.id === userId && i.message.id === message.id;
       const collector = interaction.channel.createMessageComponentCollector({
         filter,
         time: 60000,
       });
 
       collector.on("collect", async (i) => {
-        if (i.customId === "hit") {
-          playerHand.push(drawCard(deck));
-          if (calculateHandValue(playerHand) > 21) {
-            collector.stop();
-            await dealerTurn();
-          } else {
-            await updateGame(i);
+        try {
+          await i.deferUpdate();
+
+          if (i.customId === "hit_blackjack") {
+            canDouble = false;
+            const newCard = drawCard(deck);
+            if (newCard) playerHand.push(newCard);
+            playerTotal = calculateHandValue(playerHand);
+
+            if (playerTotal >= 21) {
+              collector.stop("player_action_complete");
+              await determineAndEndGame(
+                i,
+                userId,
+                playerHand,
+                dealerHand,
+                deck,
+                currentBet,
+                initialStreak
+              );
+            } else {
+              const gameEmbed = createGameEmbed(playerHand, dealerHand);
+              const actions = createActionRow(playerTotal, false, currentBet);
+              await i.editReply({ embeds: [gameEmbed], components: [actions] });
+            }
+          } else if (i.customId === "stand_blackjack") {
+            collector.stop("player_action_complete");
+            await determineAndEndGame(
+              i,
+              userId,
+              playerHand,
+              dealerHand,
+              deck,
+              currentBet,
+              initialStreak
+            );
+          } else if (i.customId === "double_blackjack") {
+            if (currentBalance < initialBet) {
+              await i.followUp({
+                content: "❌ You cannot afford to double down!",
+                ephemeral: true,
+              });
+              return;
+            }
+            await updateUserBalance(userId, -initialBet, 0);
+            currentBalance -= initialBet;
+            currentBet *= 2;
+
+            canDouble = false;
+            const newCard = drawCard(deck);
+            if (newCard) playerHand.push(newCard);
+
+            collector.stop("player_action_complete");
+            await determineAndEndGame(
+              i,
+              userId,
+              playerHand,
+              dealerHand,
+              deck,
+              currentBet,
+              initialStreak
+            );
+          } else if (i.customId === "play_again_blackjack") {
+            collector.stop("restart");
+            module.exports.execute(i);
           }
-        } else if (i.customId === "stand") {
-          collector.stop();
-          await dealerTurn();
-        } else if (i.customId === "double") {
-          bet *= 2;
-          playerHand.push(drawCard(deck));
-          collector.stop();
-          await dealerTurn();
-        } else if (i.customId === "split") {
-          let splitHand = [playerHand.pop()];
-          playerHand.push(drawCard(deck));
-          splitHand.push(drawCard(deck));
-          await playSplitHand(i, splitHand);
-        } else if (i.customId === "play_again") {
-          collector.stop();
-          await restartGame(i);
+
+          if (collector.checkEnd() === false) {
+            collector.resetTimer();
+          }
+        } catch (error) {
+          console.error("Error during Blackjack button interaction:", error);
+          collector.stop("error");
+          try {
+            await i.followUp({
+              content: "❌ An error occurred during your turn.",
+              ephemeral: true,
+            });
+          } catch {}
         }
       });
 
-      collector.on("end", async () => {
-        await interaction.editReply({ components: [] });
+      collector.on("end", async (collected, reason) => {
+        if (reason === "time") {
+          try {
+            const timeoutEmbed = new EmbedBuilder()
+              .setTitle("🃏 Blackjack Timeout")
+              .setDescription(
+                "Game timed out due to inactivity. Your bet is lost."
+              )
+              .setColor("Orange");
+            await updateUserBalance(userId, -currentBet, 0);
+            await updateStreak(userId, "loss");
+            await interaction.editReply({
+              embeds: [timeoutEmbed],
+              components: [],
+            });
+          } catch (error) {
+            console.warn(
+              "Failed to edit reply on collector timeout:",
+              error.message
+            );
+          }
+        } else if (
+          reason !== "player_action_complete" &&
+          reason !== "restart" &&
+          reason !== "error"
+        ) {
+          try {
+            if (interaction.message && !interaction.message.deleted) {
+              await interaction.editReply({ components: [] });
+            }
+          } catch (error) {
+            console.warn(
+              "Failed to remove components on collector end (generic):",
+              error.message
+            );
+          }
+        }
       });
-
-      await updateGame(interaction);
     } catch (error) {
       console.error("Error executing /blackjack command:", error);
-      await interaction.reply({
-        content: "❌ An error occurred while executing the command.",
-        ephemeral: true,
-      });
+      const errorContent =
+        "❌ An error occurred setting up the Blackjack game.";
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: errorContent, ephemeral: true });
+      } else {
+        await interaction.editReply({
+          content: errorContent,
+          embeds: [],
+          components: [],
+        });
+      }
     }
   },
 };
-
-async function playSplitHand(interaction, splitHand) {
-  let splitTotal = calculateHandValue(splitHand);
-  let embed = new EmbedBuilder()
-    .setTitle("🃏 Blackjack - Split Hand")
-    .setDescription(
-      `**Your Split Hand:** ${formatHand(splitHand)} (${splitTotal})\n` +
-        `**Dealer's Hand:** ${dealerHand[0].rank}${dealerHand[0].suit} ?\n`
-    )
-    .setColor("Blue");
-
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("hit_split")
-      .setLabel("Hit")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("stand_split")
-      .setLabel("Stand")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  await interaction.update({
-    embeds: [embed],
-    components: [row],
-  });
-
-  const filter = (i) => i.isButton() && i.user.id === interaction.user.id;
-  const collector = interaction.channel.createMessageComponentCollector({
-    filter,
-    time: 60000,
-  });
-
-  collector.on("collect", async (i) => {
-    if (i.customId === "hit_split") {
-      splitHand.push(drawCard(deck));
-      splitTotal = calculateHandValue(splitHand);
-      if (splitTotal > 21) {
-        collector.stop();
-        await dealerTurn();
-      } else {
-        await playSplitHand(i, splitHand);
-      }
-    } else if (i.customId === "stand_split") {
-      collector.stop();
-      await dealerTurn();
-    } else if (i.customId === "play_again") {
-      collector.stop();
-      await restartGame(i);
-    }
-  });
-
-  collector.on("end", async () => {
-    await interaction.editReply({ components: [] });
-  });
-}
