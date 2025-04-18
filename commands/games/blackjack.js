@@ -1,19 +1,19 @@
-import path from "path";
-import {
+const path = require("path");
+const {
   SlashCommandBuilder,
   EmbedBuilder,
   ButtonBuilder,
   ActionRowBuilder,
   ButtonStyle,
   InteractionFlags,
-} from "discord.js";
-import {
+} = require("discord.js");
+const {
   getUserBalance,
   updateUserBalance,
   getUserStreak,
   updateStreak,
   markUserActive,
-} from "../../utils/database";
+} = require("../../utils/database");
 
 const SUITS = ["♠", "♥", "♦", "♣"];
 const RANKS = [

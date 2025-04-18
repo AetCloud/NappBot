@@ -1,5 +1,5 @@
-import path from "path";
-import {
+const path = require("path");
+const {
   SlashCommandBuilder,
   EmbedBuilder,
   ButtonBuilder,
@@ -7,14 +7,14 @@ import {
   ButtonStyle,
   InteractionFlags,
   ComponentType,
-} from "discord.js";
-import {
+} = require("discord.js");
+const {
   getUserBalance,
   updateUserBalance,
   getUserStreak,
   updateStreak,
   markUserActive,
-} from "../../utils/database";
+} = require("../../utils/database");
 
 const SYMBOLS = ["🍒", "🍋", "🍊", "🍉", "⭐", "💎"];
 const getRandomSymbol = () =>
