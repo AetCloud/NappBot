@@ -7,9 +7,6 @@ module.exports = {
     console.log(`✅ Logged in as ${client.user.tag}`);
     console.log(`🌐 Serving ${client.guilds.cache.size} guilds`);
 
-    // Set bot presence/activity
-    client.user.setActivity("with n4ppstar..", { type: "PLAYING" });
-
     // Start the interest application schedule
     // This will calculate the time until the next hour and schedule the first run.
     // Subsequent runs are scheduled automatically by applyInterestAndReschedule.

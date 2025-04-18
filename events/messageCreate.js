@@ -256,9 +256,8 @@ module.exports = {
 
       const suggestionEmbed = new EmbedBuilder()
         .setColor("#77DD77")
-        .setTitle("💡 Pokémon Guess!")
+        .setTitle("💡 MewBot Helper!")
         .setDescription(`Hint: \`${hint}\`\nMatch: **${expectedName}**`)
-        .setFooter({ text: `Helper by ${client.user.username}` })
         .addFields({
           name: "Parsed Info",
           value: `ID: \`${parsedId}\`, Form: \`${parsedFormId}\``,

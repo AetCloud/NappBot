@@ -41,7 +41,6 @@ module.exports = {
     }
 
     let currentIndex = 0;
-    let timeout;
 
     function createEmbed(postData) {
       return new EmbedBuilder()
@@ -96,13 +95,6 @@ module.exports = {
       time: 90000, // 1.5 minutes
     });
 
-    function resetTimeout() {
-      if (timeout) clearTimeout(timeout);
-      timeout = setTimeout(() => collector.stop(), 90000);
-    }
-
-    resetTimeout();
-
     collector.on("collect", async (i) => {
       if (i.customId === "next") {
         currentIndex = Math.min(currentIndex + 1, postDataArray.length - 1);
@@ -115,17 +107,17 @@ module.exports = {
         components: [createRow()],
       });
 
-      resetTimeout();
+      // Reset the collector's inactivity timer
+      collector.resetTimer();
     });
 
     collector.on("end", async () => {
       try {
         await interaction.editReply({ components: [] });
       } catch (error) {
-        console.warn("⚠️ Failed to remove buttons (likely already deleted)");
+        // Ignore error if message was deleted
       }
     });
   },
   modulePath: __filename,
 };
-
