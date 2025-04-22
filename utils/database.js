@@ -98,6 +98,14 @@ const TABLE_DEFS = {
             last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
     `,
+  verification_config: `
+        CREATE TABLE IF NOT EXISTS verification_config (
+            guild_id VARCHAR(30) PRIMARY KEY NOT NULL,
+            moderator_channel_id VARCHAR(30) NOT NULL,
+            verified_role_id VARCHAR(30) NOT NULL,
+            enabled BOOLEAN NOT NULL DEFAULT FALSE
+        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+    `,
 };
 
 async function executeQuery(query, params = []) {
@@ -292,6 +300,45 @@ async function saveLastPostedImage(guildId, imageUrl) {
   ));
 }
 
+async function setVerificationConfig(guildId, modChannelId, roleId, enabled) {
+  if (!guildId || !modChannelId || !roleId) return false;
+  await ensureTableExists("verification_config");
+  return !!(await executeQuery(
+    `INSERT INTO verification_config (guild_id, moderator_channel_id, verified_role_id, enabled)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            moderator_channel_id = VALUES(moderator_channel_id),
+            verified_role_id = VALUES(verified_role_id),
+            enabled = VALUES(enabled)`,
+    [
+      String(guildId).trim(),
+      String(modChannelId).trim(),
+      String(roleId).trim(),
+      Boolean(enabled),
+    ]
+  ));
+}
+
+async function getVerificationConfig(guildId) {
+  if (!guildId) return null;
+  await ensureTableExists("verification_config");
+  const rows = await executeQuery(
+    "SELECT moderator_channel_id, verified_role_id, enabled FROM verification_config WHERE guild_id = ?",
+    [String(guildId).trim()]
+  );
+  return rows?.[0] && rows[0].enabled ? rows[0] : null;
+}
+
+async function disableVerification(guildId) {
+  if (!guildId) return false;
+  await ensureTableExists("verification_config");
+  const result = await executeQuery(
+    "UPDATE verification_config SET enabled = FALSE WHERE guild_id = ?",
+    [String(guildId).trim()]
+  );
+  return result && result.affectedRows > 0;
+}
+
 async function getMewbotConfig(guildId) {
   if (!guildId) return null;
   await ensureTableExists("mewbot_config");
@@ -382,6 +429,10 @@ module.exports = {
 
   getLastPostedImage,
   saveLastPostedImage,
+
+  setVerificationConfig,
+  getVerificationConfig,
+  disableVerification,
 
   getMewbotConfig,
   setMewbotWatchConfig,
