@@ -25,7 +25,7 @@ module.exports = {
     const guildId = interaction.guild.id;
     const config = await getVerificationConfig(guildId);
 
-    if (!config) {
+    if (!config || !config.enabled) {
       return interaction.reply({
         content:
           "❌ Age verification is not enabled or configured on this server.",
@@ -43,40 +43,40 @@ module.exports = {
 
     const modal = new ModalBuilder()
       .setCustomId(`age_verification_modal_${guildId}`)
-      .setTitle("Age Verification Form");
+      .setTitle("Server Verification Form");
 
-    const socialLinkInput = new TextInputBuilder()
-      .setCustomId("social_link")
-      .setLabel("X (Twitter) or Bluesky Link")
-      .setPlaceholder(
-        "https://twitter.com/username OR https://bsky.app/profile/handle.bsky.social"
-      )
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
+    const components = [];
+    const questions = [
+      config.question1,
+      config.question2,
+      config.question3,
+      config.question4,
+    ];
+    let questionCount = 0;
 
-    const ageInput = new TextInputBuilder()
-      .setCustomId("declared_age")
-      .setLabel("Your Age")
-      .setPlaceholder("Enter your current age (e.g., 18)")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true);
+    questions.forEach((questionText, index) => {
+      if (questionText && questionCount < 5) {
+        questionCount++;
+        const questionInput = new TextInputBuilder()
+          .setCustomId(`custom_question_${index + 1}`)
+          .setLabel(questionText.substring(0, 45))
+          .setPlaceholder(`Answer for: ${questionText.substring(0, 90)}...`)
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true);
 
-    const dobInput = new TextInputBuilder()
-      .setCustomId("date_of_birth")
-      .setLabel("Date of Birth (YYYY-MM-DD)")
-      .setPlaceholder("Example: 1999-12-31")
-      .setStyle(TextInputStyle.Short)
-      .setRequired(true)
-      .setMinLength(10)
-      .setMaxLength(10);
+        components.push(new ActionRowBuilder().addComponents(questionInput));
+      }
+    });
 
-    const firstActionRow = new ActionRowBuilder().addComponents(
-      socialLinkInput
-    );
-    const secondActionRow = new ActionRowBuilder().addComponents(ageInput);
-    const thirdActionRow = new ActionRowBuilder().addComponents(dobInput);
+    if (components.length === 0) {
+      return interaction.reply({
+        content:
+          "❌ This server has verification enabled, but no questions have been configured by the administrators.",
+        ephemeral: true,
+      });
+    }
 
-    modal.addComponents(firstActionRow, secondActionRow, thirdActionRow);
+    modal.addComponents(components);
 
     try {
       await interaction.showModal(modal);
@@ -85,16 +85,14 @@ module.exports = {
       if (!interaction.replied && !interaction.deferred) {
         await interaction
           .reply({
-            content:
-              "❌ Could not display the verification form. Please try again.",
+            content: "❌ Could not display the verification form.",
             ephemeral: true,
           })
           .catch(() => {});
       } else {
         await interaction
           .followUp({
-            content:
-              "❌ Could not display the verification form. Please try again.",
+            content: "❌ Could not display the verification form.",
             ephemeral: true,
           })
           .catch(() => {});

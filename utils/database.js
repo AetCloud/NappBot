@@ -99,13 +99,17 @@ const TABLE_DEFS = {
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
     `,
   verification_config: `
-        CREATE TABLE IF NOT EXISTS verification_config (
-            guild_id VARCHAR(30) PRIMARY KEY NOT NULL,
-            moderator_channel_id VARCHAR(30) NOT NULL,
-            verified_role_id VARCHAR(30) NOT NULL,
-            enabled BOOLEAN NOT NULL DEFAULT FALSE
-        ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
-    `,
+    CREATE TABLE IF NOT EXISTS verification_config (
+        guild_id VARCHAR(30) PRIMARY KEY NOT NULL,
+        moderator_channel_id VARCHAR(30) NOT NULL,
+        verified_role_id VARCHAR(30) NOT NULL,
+        enabled BOOLEAN NOT NULL DEFAULT FALSE,
+        question1 TEXT NULL DEFAULT NULL, -- Store question 1 text
+        question2 TEXT NULL DEFAULT NULL, -- Store question 2 text
+        question3 TEXT NULL DEFAULT NULL, -- Store question 3 text
+        question4 TEXT NULL DEFAULT NULL  -- Store question 4 text
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+`,
   command_control_config: `
     CREATE TABLE IF NOT EXISTS command_control_config (
         guild_id VARCHAR(30) NOT NULL,
@@ -309,33 +313,63 @@ async function saveLastPostedImage(guildId, imageUrl) {
   ));
 }
 
-async function setVerificationConfig(guildId, modChannelId, roleId, enabled) {
+async function setVerificationConfig(
+  guildId,
+  modChannelId,
+  roleId,
+  enabled,
+  q1 = null,
+  q2 = null,
+  q3 = null,
+  q4 = null
+) {
   if (!guildId || !modChannelId || !roleId) return false;
   await ensureTableExists("verification_config");
-  return !!(await executeQuery(
-    `INSERT INTO verification_config (guild_id, moderator_channel_id, verified_role_id, enabled)
-         VALUES (?, ?, ?, ?)
-         ON DUPLICATE KEY UPDATE
-            moderator_channel_id = VALUES(moderator_channel_id),
-            verified_role_id = VALUES(verified_role_id),
-            enabled = VALUES(enabled)`,
-    [
-      String(guildId).trim(),
-      String(modChannelId).trim(),
-      String(roleId).trim(),
-      Boolean(enabled),
-    ]
-  ));
+
+  const questions = [q1, q2, q3, q4].map((q) =>
+    q && typeof q === "string" ? q.trim() : null
+  );
+
+  const sql = `
+    INSERT INTO verification_config
+      (guild_id, moderator_channel_id, verified_role_id, enabled, question1, question2, question3, question4)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON DUPLICATE KEY UPDATE
+      moderator_channel_id = VALUES(moderator_channel_id),
+      verified_role_id = VALUES(verified_role_id),
+      enabled = VALUES(enabled),
+      question1 = VALUES(question1),
+      question2 = VALUES(question2),
+      question3 = VALUES(question3),
+      question4 = VALUES(question4)
+  `;
+
+  const params = [
+    String(guildId).trim(),
+    String(modChannelId).trim(),
+    String(roleId).trim(),
+    Boolean(enabled),
+    questions[0],
+    questions[1],
+    questions[2],
+    questions[3],
+  ];
+
+  return !!(await executeQuery(sql, params));
 }
 
 async function getVerificationConfig(guildId) {
   if (!guildId) return null;
   await ensureTableExists("verification_config");
   const rows = await executeQuery(
-    "SELECT moderator_channel_id, verified_role_id, enabled FROM verification_config WHERE guild_id = ?",
+    "SELECT moderator_channel_id, verified_role_id, enabled, question1, question2, question3, question4 FROM verification_config WHERE guild_id = ?",
     [String(guildId).trim()]
   );
-  return rows?.[0] && rows[0].enabled ? rows[0] : null;
+  if (rows && rows.length > 0) {
+    rows[0].enabled = Boolean(rows[0].enabled);
+    return rows[0];
+  }
+  return null;
 }
 
 async function disableVerification(guildId) {
