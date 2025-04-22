@@ -12,6 +12,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("e621")
     .setDescription("🔞 Interact with e621.net (Search posts or view profiles)")
+    .setNSFW(true)
     .addSubcommand((subcommand) =>
       subcommand
         .setName("search")

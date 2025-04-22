@@ -13,6 +13,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("walltaker")
     .setDescription("🖼️ Fetch the latest image from Walltaker.")
+    .setNSFW(true)
     .addStringOption((option) =>
       option
         .setName("feed_id")

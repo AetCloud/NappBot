@@ -11,6 +11,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("rule34")
     .setDescription("🔞 Search for images on Rule34.xxx")
+    .setNSFW(true)
     .addStringOption((option) =>
       option
         .setName("tags")

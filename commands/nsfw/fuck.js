@@ -74,6 +74,7 @@ module.exports = {
   data: new SlashCommandBuilder()
     .setName("fuck")
     .setDescription("🔥 Give someone some love~")
+    .setNSFW(true)
     .addUserOption((option) =>
       option
         .setName("user")

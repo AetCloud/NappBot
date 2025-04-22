@@ -6,7 +6,11 @@ const {
   PermissionFlagsBits,
   InteractionType,
 } = require("discord.js");
-const { getVerificationConfig } = require("../utils/database");
+const {
+  getVerificationConfig,
+  getCommandCategorySettings,
+} = require("../utils/database");
+const path = require("path");
 const cooldowns = new Map();
 
 const DEFAULT_COOLDOWN = 3;
@@ -24,6 +28,56 @@ module.exports = {
             ephemeral: true,
           })
           .catch(console.error);
+      }
+
+      if (interaction.inGuild() && command.filePath) {
+        const guildId = interaction.guild.id;
+        const category = path
+          .dirname(command.filePath)
+          .split(path.sep)
+          .pop()
+          ?.toLowerCase();
+
+        if (category) {
+          const settings = await getCommandCategorySettings(guildId, category);
+
+          if (!settings.enabled) {
+            return interaction
+              .reply({
+                content: `❌ Commands in the \`${category}\` category are currently disabled in this server.`,
+                ephemeral: true,
+              })
+              .catch(console.error);
+          }
+
+          if (settings.required_role_id) {
+            if (!interaction.member || !interaction.member.roles) {
+              console.warn(
+                `Could not check roles for user ${interaction.user.id} for command ${command.data.name}`
+              );
+              return interaction
+                .reply({
+                  content: "❌ Could not verify your roles for this command.",
+                  ephemeral: true,
+                })
+                .catch(console.error);
+            }
+            if (
+              !interaction.member.roles.cache.has(settings.required_role_id)
+            ) {
+              return interaction
+                .reply({
+                  content: `❌ You need the <@&${settings.required_role_id}> role to use commands in the \`${category}\` category in this server.`,
+                  ephemeral: true,
+                })
+                .catch(console.error);
+            }
+          }
+        } else {
+          console.warn(
+            `Could not determine category for command: ${command.data.name} (Path: ${command.filePath})`
+          );
+        }
       }
 
       const cooldownKey = `${interaction.user.id}-${command.data.name}`;
@@ -64,14 +118,16 @@ module.exports = {
                 deferred = true;
               }
             } catch (deferError) {
-              console.error(
-                `Error during auto-deferral for /${interaction.commandName}:`,
-                deferError
-              );
+              if (deferError.code !== 10062) {
+                console.error(
+                  `Error during auto-deferral for /${interaction.commandName}:`,
+                  deferError
+                );
+              }
             }
           }, DEFER_THRESHOLD);
         } else {
-          if (commandDefer) {
+          if (commandDefer && !interaction.deferred) {
             await interaction.deferReply({ ephemeral: commandEphemeral });
             deferred = true;
           }
@@ -96,15 +152,16 @@ module.exports = {
 
         try {
           if (interaction.replied || interaction.deferred) {
-            await interaction.editReply({
-              embeds: [errorEmbed],
-              components: [],
-            });
+            await interaction
+              .editReply({ content: "", embeds: [errorEmbed], components: [] })
+              .catch(console.error);
           } else {
-            await interaction.reply({
-              embeds: [errorEmbed],
-              ephemeral: true,
-            });
+            await interaction
+              .reply({
+                embeds: [errorEmbed],
+                ephemeral: true,
+              })
+              .catch(console.error);
           }
         } catch (replyError) {
           console.error(
@@ -125,17 +182,31 @@ module.exports = {
       }
     } else if (interaction.type === InteractionType.ModalSubmit) {
       if (interaction.customId.startsWith("age_verification_modal_")) {
-        await interaction.deferReply({ ephemeral: true });
+        if (!interaction.isRepliable()) return;
+        await interaction.deferReply({ ephemeral: true }).catch((err) => {
+          console.error("Error deferring modal reply:", err);
+          return;
+        });
 
         const guildId = interaction.guild.id;
+        if (!guildId) {
+          return interaction
+            .editReply({
+              content: "Modal interactions must be in a server.",
+              ephemeral: true,
+            })
+            .catch(console.error);
+        }
         const config = await getVerificationConfig(guildId);
 
         if (!config) {
-          return interaction.editReply({
-            content:
-              "❌ Age verification is not enabled or configured on this server.",
-            ephemeral: true,
-          });
+          return interaction
+            .editReply({
+              content:
+                "❌ Age verification is not enabled or configured on this server.",
+              ephemeral: true,
+            })
+            .catch(console.error);
         }
 
         try {
@@ -148,16 +219,20 @@ module.exports = {
           const submitter = interaction.user;
 
           if (isNaN(parseInt(declaredAge)) || parseInt(declaredAge) < 0) {
-            return interaction.editReply({
-              content: "❌ Please enter a valid number for age.",
-              ephemeral: true,
-            });
+            return interaction
+              .editReply({
+                content: "❌ Please enter a valid number for age.",
+                ephemeral: true,
+              })
+              .catch(console.error);
           }
           if (!/^\d{4}-\d{2}-\d{2}$/.test(dateOfBirth)) {
-            return interaction.editReply({
-              content: "❌ Please enter Date of Birth in YYYY-MM-DD format.",
-              ephemeral: true,
-            });
+            return interaction
+              .editReply({
+                content: "❌ Please enter Date of Birth in YYYY-MM-DD format.",
+                ephemeral: true,
+              })
+              .catch(console.error);
           }
 
           const modChannel = await interaction.guild.channels
@@ -167,11 +242,13 @@ module.exports = {
             console.error(
               `Verification Error: Moderator channel ${config.moderator_channel_id} not found or not text-based for guild ${guildId}.`
             );
-            return interaction.editReply({
-              content:
-                "❌ Internal error: Could not find the moderator channel. Please contact server staff.",
-              ephemeral: true,
-            });
+            return interaction
+              .editReply({
+                content:
+                  "❌ Internal error: Could not find the moderator channel. Please contact server staff.",
+                ephemeral: true,
+              })
+              .catch(console.error);
           }
 
           const botMember = await interaction.guild.members.fetch(
@@ -185,10 +262,12 @@ module.exports = {
             console.error(
               `Verification Error: Missing Send/Embed permissions in ${modChannel.name} (Guild ${guildId}).`
             );
-            return interaction.editReply({
-              content: `❌ Internal error: I cannot send messages to the moderator channel. Please contact server staff.`,
-              ephemeral: true,
-            });
+            return interaction
+              .editReply({
+                content: `❌ Internal error: I cannot send messages to the moderator channel. Please contact server staff.`,
+                ephemeral: true,
+              })
+              .catch(console.error);
           }
 
           const verificationEmbed = new EmbedBuilder()
@@ -231,21 +310,28 @@ module.exports = {
             components: [row],
           });
 
-          await interaction.editReply({
-            content:
-              "✅ Your verification request has been submitted for review.",
-            ephemeral: true,
-          });
+          await interaction
+            .editReply({
+              content:
+                "✅ Your verification request has been submitted for review.",
+              ephemeral: true,
+            })
+            .catch(console.error);
         } catch (error) {
           console.error(
             "Error processing verification modal submission:",
             error
           );
           try {
-            await interaction.editReply({
-              content: "❌ An error occurred while submitting your request.",
-              ephemeral: true,
-            });
+            if (interaction.deferred || interaction.replied) {
+              await interaction
+                .editReply({
+                  content:
+                    "❌ An error occurred while submitting your request.",
+                  ephemeral: true,
+                })
+                .catch(console.error);
+            }
           } catch (editError) {
             console.error(
               "Failed to edit modal submission error reply:",
@@ -259,6 +345,9 @@ module.exports = {
         interaction.customId.startsWith("verify_accept_") ||
         interaction.customId.startsWith("verify_reject_")
       ) {
+        if (!interaction.inGuild()) {
+          return;
+        }
         if (
           !interaction.memberPermissions?.has(PermissionFlagsBits.ManageRoles)
         ) {
@@ -271,7 +360,11 @@ module.exports = {
             .catch(console.error);
         }
 
-        await interaction.deferUpdate();
+        if (!interaction.isRepliable()) return;
+        await interaction.deferUpdate().catch((err) => {
+          console.error("Error deferring button update:", err);
+          return;
+        });
 
         const guildId = interaction.guild.id;
         const parts = interaction.customId.split("_");
@@ -292,35 +385,39 @@ module.exports = {
         const targetMember = await interaction.guild.members
           .fetch(targetUserId)
           .catch(() => null);
-        if (!targetMember) {
-          const userLeftEmbed = EmbedBuilder.from(interaction.message.embeds[0])
-            .setColor("Grey")
-            .setTitle("⚠️ Verification Action Failed")
-            .addFields({
-              name: "Status",
-              value: `User (ID: ${targetUserId}) not found in the server.`,
-            });
-          const disabledRowUserLeft = ActionRowBuilder.from(
-            interaction.message.components[0]
-          );
-          disabledRowUserLeft.components.forEach((button) =>
-            button.setDisabled(true)
-          );
-          return interaction
-            .editReply({
-              embeds: [userLeftEmbed],
-              components: [disabledRowUserLeft],
-            })
-            .catch(console.error);
-        }
 
+        if (!interaction.message) return;
         const originalEmbed = interaction.message.embeds[0];
-        if (!originalEmbed) {
+        const originalComponents = interaction.message.components[0];
+
+        if (!originalEmbed || !originalComponents) {
           return interaction
             .followUp({
               content: "❌ Could not find original request message data.",
               ephemeral: true,
             })
+            .catch(console.error);
+        }
+
+        const disabledRow = ActionRowBuilder.from(originalComponents);
+        disabledRow.components.forEach((button) => button.setDisabled(true));
+
+        if (!targetMember) {
+          const userLeftEmbed = EmbedBuilder.from(originalEmbed)
+            .setColor("Grey")
+            .setTitle("⚠️ Verification Action Cancelled")
+            .setFields(
+              [
+                originalEmbed.fields.find((f) => f.name === "👤 User"),
+                {
+                  name: "Status",
+                  value: `User (ID: ${targetUserId}) not found in the server. Action cancelled.`,
+                },
+              ].filter(Boolean)
+            )
+            .setTimestamp(new Date());
+          return interaction
+            .editReply({ embeds: [userLeftEmbed], components: [disabledRow] })
             .catch(console.error);
         }
 
@@ -336,10 +433,13 @@ module.exports = {
               newEmbed
                 .setColor("Orange")
                 .setTitle("⚠️ Verification Action Failed")
-                .addFields({
-                  name: "Error",
-                  value: `Configured role (ID: ${config.verified_role_id}) not found.`,
-                });
+                .setFields([
+                  ...originalEmbed.fields,
+                  {
+                    name: "Error",
+                    value: `Configured role (ID: ${config.verified_role_id}) not found.`,
+                  },
+                ]);
             } else {
               const botMember = await interaction.guild.members.fetch(
                 interaction.client.user.id
@@ -348,37 +448,66 @@ module.exports = {
                 newEmbed
                   .setColor("Orange")
                   .setTitle("⚠️ Verification Action Failed")
-                  .addFields({
-                    name: "Error",
-                    value: `Cannot assign role ${verifiedRole}. It's higher than or equal to my highest role.`,
-                  });
+                  .setFields([
+                    ...originalEmbed.fields,
+                    {
+                      name: "Error",
+                      value: `Cannot assign role ${verifiedRole}. It's higher than or equal to my highest role.`,
+                    },
+                  ]);
               } else {
-                await targetMember.roles.add(verifiedRole);
-                newEmbed
-                  .setColor("Green")
-                  .setTitle("✅ Age Verification Approved");
-                newEmbed.addFields({
-                  name: "Moderator Action",
-                  value: `Approved by ${interaction.user}`,
-                });
-
-                await targetMember
-                  .send(
-                    `Your age verification on **${interaction.guild.name}** has been approved!`
-                  )
-                  .catch((dmError) => {
-                    console.warn(
-                      `Could not DM user ${targetUserId} about verification approval: ${dmError.message}`
+                await targetMember.roles
+                  .add(verifiedRole)
+                  .catch(async (roleError) => {
+                    console.error(
+                      `Failed to assign role ${verifiedRole.id} to user ${targetUserId}:`,
+                      roleError
                     );
+                    newEmbed
+                      .setColor("Orange")
+                      .setTitle("⚠️ Verification Action Failed")
+                      .setFields([
+                        ...originalEmbed.fields,
+                        {
+                          name: "Error",
+                          value: `Failed to assign role. Check my permissions and role hierarchy.`,
+                        },
+                      ]);
                   });
+
+                if (newEmbed.data.color !== 0xfaa81a) {
+                  newEmbed
+                    .setColor("Green")
+                    .setTitle("✅ Age Verification Approved");
+                  newEmbed.setFields([
+                    ...originalEmbed.fields,
+                    {
+                      name: "Moderator Action",
+                      value: `Approved by ${interaction.user}`,
+                    },
+                  ]);
+
+                  await targetMember
+                    .send(
+                      `Your age verification on **${interaction.guild.name}** has been approved!`
+                    )
+                    .catch((dmError) => {
+                      console.warn(
+                        `Could not DM user ${targetUserId} about verification approval: ${dmError.message}`
+                      );
+                    });
+                }
               }
             }
           } else {
             newEmbed.setColor("Red").setTitle("❌ Age Verification Rejected");
-            newEmbed.addFields({
-              name: "Moderator Action",
-              value: `Rejected by ${interaction.user}`,
-            });
+            newEmbed.setFields([
+              ...originalEmbed.fields,
+              {
+                name: "Moderator Action",
+                value: `Rejected by ${interaction.user}`,
+              },
+            ]);
 
             await targetMember
               .send(
@@ -390,11 +519,6 @@ module.exports = {
                 );
               });
           }
-
-          const disabledRow = ActionRowBuilder.from(
-            interaction.message.components[0]
-          );
-          disabledRow.components.forEach((button) => button.setDisabled(true));
 
           await interaction.editReply({
             embeds: [newEmbed],

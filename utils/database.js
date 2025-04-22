@@ -106,6 +106,15 @@ const TABLE_DEFS = {
             enabled BOOLEAN NOT NULL DEFAULT FALSE
         ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
     `,
+  command_control_config: `
+    CREATE TABLE IF NOT EXISTS command_control_config (
+        guild_id VARCHAR(30) NOT NULL,
+        category VARCHAR(50) NOT NULL, -- e.g., 'nsfw', 'games', 'fun'
+        enabled BOOLEAN NOT NULL DEFAULT TRUE,
+        required_role_id VARCHAR(30) NULL DEFAULT NULL, -- Role needed to use commands in this category
+        PRIMARY KEY (guild_id, category)
+    ) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+`,
 };
 
 async function executeQuery(query, params = []) {
@@ -402,6 +411,61 @@ async function disableMewbotHelper(guildId) {
   );
   return result && result.affectedRows > 0;
 }
+async function setCommandCategorySettings(
+  guildId,
+  category,
+  enabled,
+  roleId = null
+) {
+  if (!guildId || !category) return false;
+  await ensureTableExists("command_control_config");
+  const roleToSet = roleId ? String(roleId).trim() : null;
+  const enabledState = Boolean(enabled);
+
+  return !!(await executeQuery(
+    `INSERT INTO command_control_config (guild_id, category, enabled, required_role_id)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE
+            enabled = VALUES(enabled),
+            required_role_id = VALUES(required_role_id)`,
+    [String(guildId).trim(), category.toLowerCase(), enabledState, roleToSet]
+  ));
+}
+
+async function getCommandCategorySettings(guildId, category) {
+  if (!guildId || !category) return { enabled: true, required_role_id: null };
+  await ensureTableExists("command_control_config");
+  const rows = await executeQuery(
+    "SELECT enabled, required_role_id FROM command_control_config WHERE guild_id = ? AND category = ?",
+    [String(guildId).trim(), category.toLowerCase()]
+  );
+  if (rows && rows.length > 0) {
+    return {
+      enabled: Boolean(rows[0].enabled),
+      required_role_id: rows[0].required_role_id,
+    };
+  }
+  return { enabled: true, required_role_id: null };
+}
+
+async function getAllCommandCategorySettings(guildId) {
+  if (!guildId) return {};
+  await ensureTableExists("command_control_config");
+  const rows = await executeQuery(
+    "SELECT category, enabled, required_role_id FROM command_control_config WHERE guild_id = ?",
+    [String(guildId).trim()]
+  );
+  const settingsMap = {};
+  if (rows) {
+    for (const row of rows) {
+      settingsMap[row.category] = {
+        enabled: Boolean(row.enabled),
+        required_role_id: row.required_role_id,
+      };
+    }
+  }
+  return settingsMap;
+}
 
 if (!databasePool) {
   console.error("❌ MySQL connection pool failed to initialize. Exiting.");
@@ -438,4 +502,8 @@ module.exports = {
   setMewbotWatchConfig,
   setMewbotOutputChannel,
   disableMewbotHelper,
+
+  setCommandCategorySettings,
+  getCommandCategorySettings,
+  getAllCommandCategorySettings,
 };
