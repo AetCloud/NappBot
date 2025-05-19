@@ -114,12 +114,18 @@ module.exports = {
         return embed;
       }
 
-      function createSearchRow(index, total) {
+      function createSearchRow(index, total, ended = false) {
+        const viewButton = new ButtonBuilder()
+          .setLabel("View on e621")
+          .setStyle(ButtonStyle.Link)
+          .setURL(postDataArray[index].postUrl);
+
+        if (ended) {
+          return new ActionRowBuilder().addComponents(viewButton);
+        }
+
         return new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setLabel("View on e621")
-            .setStyle(ButtonStyle.Link)
-            .setURL(postDataArray[index].postUrl),
+          viewButton,
           new ButtonBuilder()
             .setCustomId(`e621_prev_${interaction.id}`)
             .setLabel("⬅️ Previous")
@@ -165,16 +171,31 @@ module.exports = {
       });
 
       collector.on("end", async (collected, reason) => {
-        if (reason !== "messageDelete") {
+        if (
+          reason !== "messageDelete" &&
+          reason !== "user" &&
+          reason !== "guildDelete"
+        ) {
           try {
             if (message && !message.deleted) {
-              await interaction.editReply({ components: [] });
+              const finalEmbed = createSearchEmbed(postDataArray[currentIndex]);
+              const finalRow = createSearchRow(
+                currentIndex,
+                postDataArray.length,
+                true
+              );
+              await interaction.editReply({
+                embeds: [finalEmbed],
+                components: [finalRow],
+              });
             }
           } catch (error) {
-            console.warn(
-              "Failed to remove components on e621 search collector end:",
-              error.message
-            );
+            if (error.code !== 10008) {
+              console.warn(
+                "Failed to update components on e621 search collector end:",
+                error.message
+              );
+            }
           }
         }
       });
@@ -283,15 +304,18 @@ module.exports = {
         return embed;
       }
 
-      function createProfileRow(viewType) {
-        return new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId(`e621profile_toggle_${interaction.id}`)
-            .setLabel(
-              `View Recent ${viewType === "uploads" ? "Favorites" : "Uploads"}`
-            )
-            .setStyle(ButtonStyle.Secondary)
-        );
+      function createProfileRow(viewType, ended = false) {
+        const toggleButton = new ButtonBuilder()
+          .setCustomId(`e621profile_toggle_${interaction.id}`)
+          .setLabel(
+            `View Recent ${viewType === "uploads" ? "Favorites" : "Uploads"}`
+          )
+          .setStyle(ButtonStyle.Secondary);
+
+        if (ended) {
+          toggleButton.setDisabled(true);
+        }
+        return new ActionRowBuilder().addComponents(toggleButton);
       }
 
       const profileMessage = await interaction.editReply({
@@ -338,16 +362,31 @@ module.exports = {
       });
 
       profileCollector.on("end", async (collected, reason) => {
-        if (reason !== "messageDelete") {
+        if (
+          reason !== "messageDelete" &&
+          reason !== "user" &&
+          reason !== "guildDelete"
+        ) {
           try {
             if (profileMessage && !profileMessage.deleted) {
-              await interaction.editReply({ components: [] });
+              const finalEmbed = createProfileEmbed(
+                profileData,
+                imageData,
+                currentView
+              );
+              const finalRow = createProfileRow(currentView, true);
+              await interaction.editReply({
+                embeds: [finalEmbed],
+                components: [finalRow],
+              });
             }
           } catch (error) {
-            console.warn(
-              "Failed to remove components on e621 profile collector end:",
-              error.message
-            );
+            if (error.code !== 10008) {
+              console.warn(
+                "Failed to update components on e621 profile collector end:",
+                error.message
+              );
+            }
           }
         }
       });
