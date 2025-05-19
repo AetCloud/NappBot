@@ -150,7 +150,7 @@ module.exports = {
     if (!interaction.replied && !interaction.deferred) {
       try {
         console.log(`[${commandName}] Deferring reply.`);
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ ephemeral: false });
         console.log(`[${commandName}] Reply deferred successfully.`);
       } catch (deferError) {
         console.error(
