@@ -24,65 +24,162 @@ module.exports = {
     .setDMPermission(false),
 
   async execute(interaction) {
+    const commandName = "SauceMessageContext";
+    const userId = interaction.user.id;
+    const guildId = interaction.guildId;
+    const targetMessageId = interaction.targetMessage.id;
+
+    console.log(
+      `[${commandName}] User ${userId} in guild ${guildId} triggered on message ${targetMessageId}.`
+    );
+
     if (
       !SAUCENAO_API_KEY ||
       (SAUCENAO_API_KEY === "a286d02f3476139b8f363ebd89cf1cc25e39072d" &&
         process.env.NODE_ENV === "production")
     ) {
       console.error(
-        "SauceNAO API Key is not configured properly for production."
+        `[${commandName}] API Key issue. Key present: ${!!SAUCENAO_API_KEY}, Default key in prod: ${
+          SAUCENAO_API_KEY === "a286d02f3476139b8f363ebd89cf1cc25e39072d" &&
+          process.env.NODE_ENV === "production"
+        }`
       );
       const errorEmbed = createErrorEmbed(
         "Reverse image search is currently unavailable due to a configuration issue.",
         interaction.client.user
       );
-      return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      if (!interaction.replied && !interaction.deferred) {
+        return interaction
+          .reply({ embeds: [errorEmbed], ephemeral: true })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to send API key error reply:`,
+              e
+            )
+          );
+      } else if (interaction.deferred) {
+        return interaction
+          .editReply({ embeds: [errorEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to send API key error editReply:`,
+              e
+            )
+          );
+      }
+      return;
     }
+    console.log(`[${commandName}] API Key check passed.`);
 
     const targetMessage = interaction.targetMessage;
     let imageUrlToSearch = null;
 
+    console.log(
+      `[${commandName}] Searching for image in message ${targetMessageId}. Attachments: ${targetMessage.attachments.size}, Embeds: ${targetMessage.embeds.length}`
+    );
+
     if (targetMessage.attachments.size > 0) {
       const firstAttachment = targetMessage.attachments.first();
+      console.log(
+        `[${commandName}] Found attachment: ${firstAttachment.name}, type: ${firstAttachment.contentType}, URL: ${firstAttachment.url}`
+      );
       if (
         firstAttachment.contentType &&
         firstAttachment.contentType.startsWith("image/")
       ) {
         imageUrlToSearch = firstAttachment.url;
+        console.log(
+          `[${commandName}] Using attachment URL: ${imageUrlToSearch}`
+        );
+      } else {
+        console.log(
+          `[${commandName}] Attachment ${firstAttachment.name} is not a recognized image type.`
+        );
       }
     }
 
     if (!imageUrlToSearch && targetMessage.embeds.length > 0) {
+      console.log(`[${commandName}] No attachment image, checking embeds.`);
       for (const embed of targetMessage.embeds) {
         if (embed.image && embed.image.url) {
           imageUrlToSearch = embed.image.url;
+          console.log(
+            `[${commandName}] Using embed image URL: ${imageUrlToSearch}`
+          );
           break;
         }
         if (embed.thumbnail && embed.thumbnail.url) {
           imageUrlToSearch = embed.thumbnail.url;
+          console.log(
+            `[${commandName}] Using embed thumbnail URL: ${imageUrlToSearch}`
+          );
           break;
         }
       }
     }
 
     if (!imageUrlToSearch) {
+      console.log(
+        `[${commandName}] No searchable image found in message ${targetMessageId}.`
+      );
       const errorEmbed = createErrorEmbed(
         "No searchable image found in the selected message (check attachments or embeds).",
         interaction.client.user
       );
-      return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      if (!interaction.replied && !interaction.deferred) {
+        return interaction
+          .reply({ embeds: [errorEmbed], ephemeral: true })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to send no image error reply:`,
+              e
+            )
+          );
+      } else if (interaction.deferred) {
+        return interaction
+          .editReply({ embeds: [errorEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to send no image error editReply:`,
+              e
+            )
+          );
+      }
+      return;
     }
+    console.log(`[${commandName}] Image URL to search: ${imageUrlToSearch}`);
 
-    await interaction.deferReply({ ephemeral: true });
+    if (!interaction.replied && !interaction.deferred) {
+      try {
+        console.log(`[${commandName}] Deferring reply.`);
+        await interaction.deferReply({ ephemeral: true });
+        console.log(`[${commandName}] Reply deferred successfully.`);
+      } catch (deferError) {
+        console.error(
+          `[${commandName}] CRITICAL: Failed to defer reply:`,
+          deferError
+        );
+        return;
+      }
+    }
 
     try {
       const numResults = 5;
       const hideLevel = 0;
+      console.log(
+        `[${commandName}] Calling searchSauceNaoByUrl with URL: ${imageUrlToSearch}, numResults: ${numResults}, hideLevel: ${hideLevel}. Key Used: ${
+          SAUCENAO_API_KEY ? "Present" : "MISSING!"
+        }`
+      );
+
       const sauceNaoData = await searchSauceNaoByUrl(
         SAUCENAO_API_KEY,
         imageUrlToSearch,
         numResults,
         hideLevel
+      );
+      console.log(
+        `[${commandName}] SauceNAO API response received. Status: ${sauceNaoData?.header?.status}, Results count: ${sauceNaoData?.results?.length}`
       );
 
       if (
@@ -90,6 +187,9 @@ module.exports = {
         !sauceNaoData.results ||
         sauceNaoData.results.length === 0
       ) {
+        console.log(
+          `[${commandName}] No results from SauceNAO for ${imageUrlToSearch}.`
+        );
         const noResultsEmbed = createEmbedWithDefaults(
           interaction.client.user,
           COLORS.WARNING
@@ -103,8 +203,18 @@ module.exports = {
           footerText,
           interaction.client.user.displayAvatarURL()
         );
-        return interaction.editReply({ embeds: [noResultsEmbed] });
+        return interaction
+          .editReply({ embeds: [noResultsEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to editReply with no results:`,
+              e
+            )
+          );
       }
+      console.log(
+        `[${commandName}] Processing ${sauceNaoData.results.length} results.`
+      );
 
       const header = sauceNaoData.header;
       let limitInfo = `Searches: ${header.short_remaining}/${header.short_limit} (30s) | ${header.long_remaining}/${header.long_limit} (24h)`;
@@ -114,12 +224,12 @@ module.exports = {
       ) {
         limitInfo = `⚠️ ${limitInfo}`;
       }
+      console.log(`[${commandName}] API Limit Info: ${limitInfo}`);
 
       const results = sauceNaoData.results.sort(
         (a, b) =>
           parseFloat(b.header.similarity) - parseFloat(a.header.similarity)
       );
-      let currentIndex = 0;
 
       const embedsToShow = [];
       for (let i = 0; i < Math.min(results.length, 3); i++) {
@@ -184,17 +294,20 @@ module.exports = {
           embed.setColor(COLORS.ERROR);
         }
 
-        const footerText = `Orig. Img: ${imageUrlToSearch.substring(
+        const resultFooterText = `Orig. Img: ${imageUrlToSearch.substring(
           0,
           50
         )}... | ${limitInfo} | ${DEFAULT_BOT_FOOTER_TEXT}`;
         setCustomFooter(
           embed,
-          footerText,
+          resultFooterText,
           interaction.client.user.displayAvatarURL()
         );
         embedsToShow.push(embed);
       }
+      console.log(
+        `[${commandName}] Prepared ${embedsToShow.length} embeds for display.`
+      );
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -210,15 +323,46 @@ module.exports = {
             .setURL(results[0].data.ext_urls[0])
         );
       }
-
-      await interaction.editReply({ embeds: embedsToShow, components: [row] });
+      console.log(
+        `[${commandName}] Sending final response with embeds and buttons.`
+      );
+      await interaction
+        .editReply({ embeds: embedsToShow, components: [row] })
+        .catch((e) =>
+          console.error(`[${commandName}] Failed to editReply with results:`, e)
+        );
+      console.log(`[${commandName}] Final response sent.`);
     } catch (error) {
-      console.error("SauceNAO context menu command error:", error);
+      console.error(
+        `[${commandName}] CRITICAL ERROR in try block for message ${targetMessageId}:`,
+        error
+      );
       const errorEmbed = createErrorEmbed(
-        `An error occurred: ${error.message || "Could not fetch results."}`,
+        `An error occurred while searching: ${
+          error.message || "Could not fetch results."
+        }`,
         interaction.client.user
       );
-      await interaction.editReply({ embeds: [errorEmbed], components: [] });
+      if (interaction.deferred && !interaction.replied) {
+        await interaction
+          .editReply({ embeds: [errorEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to editReply with critical error:`,
+              e
+            )
+          );
+      } else if (!interaction.replied) {
+        await interaction
+          .reply({ embeds: [errorEmbed], ephemeral: true })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to reply with critical error:`,
+              e
+            )
+          );
+      }
+      console.log(`[${commandName}] Error reply sent.`);
     }
   },
   modulePath: __filename,

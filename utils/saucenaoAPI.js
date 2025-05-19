@@ -3,15 +3,6 @@ const FormData = require("form-data");
 
 const SAUCENAO_API_URL = "https://saucenao.com/search.php";
 
-/**
- * Searches for an image  using  SauceNAO API.
- * @param {string} apiKey - SauceNAO API key.
- * @param {string} imageUrl - The URL of the image to search.
- * @param {number} numResults - Number of results to request.
- * @param {number} hideLevel - Controls result hiding (0-3). 0=show all.
- * @param {string} dbMask - Bitmask for enabling specific indexes.
- * @returns {Promise<object|null>} The API response or null on error.
- */
 async function searchSauceNaoByUrl(
   apiKey,
   imageUrl,
@@ -20,12 +11,11 @@ async function searchSauceNaoByUrl(
   dbMask = "999"
 ) {
   if (!apiKey || !imageUrl) {
-    console.error("SauceNAO API key and Image URL are required.");
+    console.error("[SauceNAO API] API key and Image URL are required.");
     return null;
   }
 
   const params = new URLSearchParams({
-    api_key: apiKey,
     output_type: 2,
     url: imageUrl,
     numres: numResults,
@@ -33,61 +23,57 @@ async function searchSauceNaoByUrl(
     db: dbMask,
   });
 
+  const fullUrl = `${SAUCENAO_API_URL}?api_key=${encodeURIComponent(
+    apiKey
+  )}&${params.toString()}`;
+  const loggableUrl = `${SAUCENAO_API_URL}?${params.toString()}&api_key=REDACTED`;
+
   try {
-    const response = await fetch(`${SAUCENAO_API_URL}?${params.toString()}`, {
+    const response = await fetch(fullUrl, {
       method: "GET",
-      headers: { "User-Agent": "NappBot/1.0" },
+      headers: { "User-Agent": "NappBot/1.0 (SauceMessage Command)" },
     });
 
     if (!response.ok) {
       console.error(
-        `SauceNAO API error: ${response.status} ${response.statusText}`
+        `[SauceNAO API] Error by URL: ${response.status} ${response.statusText}. Requested (key redacted): ${loggableUrl}`
       );
+      let errorDataMessage = `SauceNAO API request failed with status ${response.status}`;
       try {
         const errorData = await response.json();
-        console.error("SauceNAO API Error Body:", errorData);
+        console.error("[SauceNAO API] Error Body:", errorData);
         if (errorData && errorData.header && errorData.header.message) {
-          throw new Error(`SauceNAO: ${errorData.header.message}`);
+          errorDataMessage = `SauceNAO: ${errorData.header.message}`;
         }
       } catch (e) {}
-      throw new Error(
-        `SauceNAO API request failed with status ${response.status}`
-      );
+      throw new Error(errorDataMessage);
     }
 
     const data = await response.json();
 
     if (data.header && data.header.status < 0) {
-      console.error(
-        "SauceNAO API returned client-side error:",
-        data.header.message || "Unknown client error"
-      );
-      throw new Error(data.header.message || "SauceNAO client-side error.");
+      const clientErrorMessage = data.header.message || "Unknown client error";
+      console.error(`[SauceNAO API] Client-side error: ${clientErrorMessage}`);
+      throw new Error(`SauceNAO: ${clientErrorMessage}`);
     }
     if (data.header && data.header.status > 0) {
       console.warn(
-        "SauceNAO API returned server-side warning/error:",
-        data.header.message || "Unknown server error"
+        `[SauceNAO API] Server-side warning/error: ${
+          data.header.message || "Unknown server error"
+        }`
       );
     }
 
     return data;
   } catch (error) {
-    console.error("Error fetching from SauceNAO:", error);
+    console.error(
+      `[SauceNAO API] Fetch error for ${loggableUrl}:`,
+      error.message
+    );
     throw error;
   }
 }
 
-/**
- * Searches for an image source using SauceNAO API by uploading a file.
- * @param {string} apiKey - SauceNAO API key.
- * @param {Buffer} imageBuffer - The buffer of the image to search.
- * @param {string} fileName - The name of the file.
- * @param {number} numResults - Number of results to request.
- * @param {number} hideLevel - Controls result hiding (0-3). 0=show all.
- * @param {string} dbMask - Bitmask for enabling specific indexes.
- * @returns {Promise<object|null>} The API response or null on error.
- */
 async function searchSauceNaoByFile(
   apiKey,
   imageBuffer,
@@ -98,7 +84,7 @@ async function searchSauceNaoByFile(
 ) {
   if (!apiKey || !imageBuffer || !fileName) {
     console.error(
-      "SauceNAO API key, image buffer, and file name are required."
+      "[SauceNAO API] API key, image buffer, and file name are required for file upload."
     );
     return null;
   }
@@ -115,46 +101,49 @@ async function searchSauceNaoByFile(
     const response = await fetch(SAUCENAO_API_URL, {
       method: "POST",
       body: form,
-      headers: { ...form.getHeaders(), "User-Agent": "NappBot/1.0" },
+      headers: {
+        ...form.getHeaders(),
+        "User-Agent": "NappBot/1.0 (SauceMessage Command)",
+      },
     });
 
     if (!response.ok) {
       console.error(
-        `SauceNAO API error (file upload): ${response.status} ${response.statusText}`
+        `[SauceNAO API] Error by File: ${response.status} ${response.statusText}. File: ${fileName}`
       );
+      let errorDataMessage = `SauceNAO API request failed with status ${response.status} (file upload)`;
       try {
         const errorData = await response.json();
-        console.error("SauceNAO API Error Body (file upload):", errorData);
+        console.error("[SauceNAO API] Error Body (file upload):", errorData);
         if (errorData && errorData.header && errorData.header.message) {
-          throw new Error(`SauceNAO: ${errorData.header.message}`);
+          errorDataMessage = `SauceNAO: ${errorData.header.message}`;
         }
       } catch (e) {}
-      throw new Error(
-        `SauceNAO API request failed with status ${response.status} (file upload)`
-      );
+      throw new Error(errorDataMessage);
     }
 
     const data = await response.json();
 
     if (data.header && data.header.status < 0) {
+      const clientErrorMessage = data.header.message || "Unknown client error";
       console.error(
-        "SauceNAO API returned client-side error (file upload):",
-        data.header.message || "Unknown client error"
+        `[SauceNAO API] Client-side error (file upload): ${clientErrorMessage}`
       );
-      throw new Error(
-        data.header.message || "SauceNAO client-side error (file upload)."
-      );
+      throw new Error(`SauceNAO: ${clientErrorMessage} (file upload).`);
     }
     if (data.header && data.header.status > 0) {
       console.warn(
-        "SauceNAO API returned server-side warning/error (file upload):",
-        data.header.message || "Unknown server error"
+        `[SauceNAO API] Server-side warning/error (file upload): ${
+          data.header.message || "Unknown server error"
+        }`
       );
     }
-
     return data;
   } catch (error) {
-    console.error("Error fetching from SauceNAO (file upload):", error);
+    console.error(
+      `[SauceNAO API] Fetch error for file ${fileName}:`,
+      error.message
+    );
     throw error;
   }
 }

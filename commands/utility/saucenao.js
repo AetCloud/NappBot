@@ -62,19 +62,34 @@ module.exports = {
     ),
 
   async execute(interaction) {
-    if (
-      !SAUCENAO_API_KEY ||
-      (SAUCENAO_API_KEY === "a286d02f3476139b8f363ebd89cf1cc25e39072d" &&
-        process.env.NODE_ENV === "production")
-    ) {
+    const commandName = "SauceNaoSlash";
+    if (!SAUCENAO_API_KEY) {
       console.error(
-        "SauceNAO API Key is not configured properly for production."
+        `[${commandName}] SauceNAO API Key is not configured in environment variables.`
       );
       const errorEmbed = createErrorEmbed(
-        "Reverse image search is currently unavailable due to a configuration issue.",
+        "Reverse image search is currently unavailable due to a configuration issue. Please contact the bot owner.",
         interaction.client.user
       );
-      return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      if (interaction.replied || interaction.deferred) {
+        return interaction
+          .editReply({ embeds: [errorEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to editReply for API key error:`,
+              e
+            )
+          );
+      } else {
+        return interaction
+          .reply({ embeds: [errorEmbed], ephemeral: true })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to reply for API key error:`,
+              e
+            )
+          );
+      }
     }
 
     const imageUrl = interaction.options.getString("image_url");
@@ -87,30 +102,53 @@ module.exports = {
         "You must provide either an image URL or an image upload.",
         interaction.client.user
       );
-      return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      if (interaction.replied || interaction.deferred) {
+        return interaction.editReply({ embeds: [errorEmbed], components: [] });
+      } else {
+        return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      }
     }
     if (imageUrl && imageUpload) {
       const errorEmbed = createErrorEmbed(
         "Please provide either an image URL or an image upload, not both.",
         interaction.client.user
       );
-      return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      if (interaction.replied || interaction.deferred) {
+        return interaction.editReply({ embeds: [errorEmbed], components: [] });
+      } else {
+        return interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+      }
     }
 
-    await interaction.deferReply();
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.deferReply();
+    }
 
     try {
       let sauceNaoData;
       let sourceImageUrl = imageUrl;
+      console.log(
+        `[${commandName}] User ${interaction.user.id} initiated search. URL: ${
+          imageUrl || "N/A"
+        }, Upload: ${imageUpload ? imageUpload.name : "N/A"}`
+      );
 
       if (imageUpload) {
         sourceImageUrl = imageUpload.url;
+        console.log(`[${commandName}] Processing upload: ${imageUpload.name}`);
         const imageResponse = await fetch(imageUpload.url);
-        if (!imageResponse.ok)
+        if (!imageResponse.ok) {
+          console.error(
+            `[${commandName}] Failed to fetch uploaded image ${imageUpload.url}: ${imageResponse.statusText}`
+          );
           throw new Error(
             `Failed to fetch uploaded image: ${imageResponse.statusText}`
           );
+        }
         const imageBuffer = await imageResponse.buffer();
+        console.log(
+          `[${commandName}] Image buffer created for ${imageUpload.name}. Calling API by file.`
+        );
         sauceNaoData = await searchSauceNaoByFile(
           SAUCENAO_API_KEY,
           imageBuffer,
@@ -119,6 +157,7 @@ module.exports = {
           hideLevel
         );
       } else {
+        console.log(`[${commandName}] Calling API by URL: ${imageUrl}`);
         sauceNaoData = await searchSauceNaoByUrl(
           SAUCENAO_API_KEY,
           imageUrl,
@@ -126,12 +165,20 @@ module.exports = {
           hideLevel
         );
       }
+      console.log(
+        `[${commandName}] API Response: Status ${sauceNaoData?.header?.status}, Results: ${sauceNaoData?.results?.length}`
+      );
 
       if (
         !sauceNaoData ||
         !sauceNaoData.results ||
         sauceNaoData.results.length === 0
       ) {
+        console.log(
+          `[${commandName}] No results found for ${
+            sourceImageUrl || "uploaded image"
+          }.`
+        );
         const noResultsEmbed = createEmbedWithDefaults(
           interaction.client.user,
           COLORS.WARNING
@@ -139,17 +186,21 @@ module.exports = {
           .setTitle("🖼️ SauceNAO Search")
           .setDescription("No results found for the provided image.")
           .setThumbnail(sourceImageUrl || null);
-        return interaction.editReply({ embeds: [noResultsEmbed] });
+        return interaction.editReply({
+          embeds: [noResultsEmbed],
+          components: [],
+        });
       }
 
       const header = sauceNaoData.header;
-      let limitInfo = `Short remaining: ${header.short_remaining} | Long remaining: ${header.long_remaining}`;
+      let limitInfo = `Searches: ${header.short_remaining}/${header.short_limit} (30s) | ${header.long_remaining}/${header.long_limit} (24h)`;
       if (
         parseInt(header.short_remaining) < 5 ||
         parseInt(header.long_remaining) < 20
       ) {
         limitInfo = `⚠️ ${limitInfo} (Limits low!)`;
       }
+      console.log(`[${commandName}] API Limits: ${limitInfo}`);
 
       const results = sauceNaoData.results.sort(
         (a, b) =>
@@ -205,7 +256,6 @@ module.exports = {
             value: String(result.data.source).substring(0, 1020),
           });
         }
-
         if (result.data.ext_urls && result.data.ext_urls.length > 0) {
           const urlsText = result.data.ext_urls
             .map((url) => `[View Link](${url})`)
@@ -213,7 +263,6 @@ module.exports = {
             .substring(0, 1020);
           embed.addFields({ name: "External Links", value: urlsText });
         }
-
         if (
           parseFloat(result.header.similarity) <
           (parseFloat(header.minimum_similarity) || 60)
@@ -235,14 +284,12 @@ module.exports = {
               })\n${embed.data.description || ""}`
             );
         }
-
         const footerText = `Searched by ${interaction.user.tag} | ${limitInfo} | ${DEFAULT_BOT_FOOTER_TEXT}`;
         setCustomFooter(
           embed,
           footerText,
           interaction.client.user.displayAvatarURL()
         );
-
         return embed;
       };
 
@@ -274,27 +321,12 @@ module.exports = {
         return row;
       };
 
-      if (results.length === 0) {
-        const noResultsEmbed = createEmbedWithDefaults(
-          interaction.client.user,
-          COLORS.WARNING
-        )
-          .setTitle("🖼️ SauceNAO Search")
-          .setDescription("No results found for the provided image.")
-          .setThumbnail(sourceImageUrl || null);
-        const footerText = `Searched by ${interaction.user.tag} | ${limitInfo} | ${DEFAULT_BOT_FOOTER_TEXT}`;
-        setCustomFooter(
-          noResultsEmbed,
-          footerText,
-          interaction.client.user.displayAvatarURL()
-        );
-        return interaction.editReply({ embeds: [noResultsEmbed] });
-      }
-
+      console.log(`[${commandName}] Preparing to send results.`);
       const message = await interaction.editReply({
         embeds: [generateResultEmbed(results[currentIndex])],
         components: [generateButtons(currentIndex, results.length)],
       });
+      console.log(`[${commandName}] Results sent.`);
 
       const filter = (i) =>
         i.user.id === interaction.user.id &&
@@ -307,6 +339,7 @@ module.exports = {
       });
 
       collector.on("collect", async (i) => {
+        console.log(`[${commandName}] Collector received: ${i.customId}`);
         await i.deferUpdate();
         if (i.customId.startsWith("saucenao_next_")) {
           currentIndex = Math.min(currentIndex + 1, results.length - 1);
@@ -318,9 +351,13 @@ module.exports = {
           components: [generateButtons(currentIndex, results.length)],
         });
         collector.resetTimer();
+        console.log(
+          `[${commandName}] Collector updated to index ${currentIndex}`
+        );
       });
 
       collector.on("end", (collected, reason) => {
+        console.log(`[${commandName}] Collector ended. Reason: ${reason}`);
         if (
           reason !== "messageDelete" &&
           reason !== "user" &&
@@ -348,22 +385,39 @@ module.exports = {
             .catch((err) => {
               if (err.code !== 10008)
                 console.error(
-                  "Error editing SauceNAO reply on collector end:",
+                  `[${commandName}] Error editing SauceNAO reply on collector end:`,
                   err
                 );
             });
         }
       });
     } catch (error) {
-      console.error("SauceNAO command error:", error);
+      console.error(
+        `[${commandName}] CRITICAL ERROR in main try block for user ${interaction.user.id}:`,
+        error
+      );
       const errorEmbed = createErrorEmbed(
         `An error occurred: ${error.message || "Could not fetch results."}`,
         interaction.client.user
       );
       if (interaction.deferred || interaction.replied) {
-        await interaction.editReply({ embeds: [errorEmbed], components: [] });
+        await interaction
+          .editReply({ embeds: [errorEmbed], components: [] })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to editReply with critical error:`,
+              e
+            )
+          );
       } else {
-        await interaction.reply({ embeds: [errorEmbed], ephemeral: true });
+        await interaction
+          .reply({ embeds: [errorEmbed], ephemeral: true })
+          .catch((e) =>
+            console.error(
+              `[${commandName}] Failed to reply with critical error:`,
+              e
+            )
+          );
       }
     }
   },
