@@ -1,4 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -32,13 +36,16 @@ module.exports = {
           inline: false,
         }
       )
-      .setFooter({
-        text: `Requested by ${interaction.user.tag}`,
-        iconURL: interaction.user.displayAvatarURL(),
-      });
+      .setTimestamp();
+
+    const footerText = `Requested by ${interaction.user.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+    setCustomFooter(
+      embed,
+      footerText,
+      interaction.client.user.displayAvatarURL()
+    );
 
     await interaction.reply({ embeds: [embed] });
   },
   modulePath: __filename,
 };
-

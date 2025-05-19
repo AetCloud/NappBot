@@ -5,6 +5,7 @@ const {
   ButtonStyle,
   EmbedBuilder,
 } = require("discord.js");
+const { setDefaultFooter } = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -21,10 +22,9 @@ module.exports = {
       )
       .setColor("#5865F2")
       .setThumbnail(interaction.client.user.displayAvatarURL())
-      .setFooter({
-        text: "Powered by NappBot",
-        iconURL: interaction.client.user.displayAvatarURL(),
-      });
+      .setTimestamp();
+
+    setDefaultFooter(embed, interaction.client.user);
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
@@ -41,4 +41,3 @@ module.exports = {
   },
   modulePath: __filename,
 };
-

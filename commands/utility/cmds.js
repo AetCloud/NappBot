@@ -8,6 +8,10 @@ const {
   ComponentType,
 } = require("discord.js");
 const path = require("path");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -18,6 +22,7 @@ module.exports = {
   async execute(interaction) {
     try {
       const commandList = interaction.client.commands;
+      const clientUser = interaction.client.user;
 
       if (!commandList || commandList.size === 0) {
         return interaction.editReply("⚠️ No commands available.");
@@ -74,20 +79,20 @@ module.exports = {
           commandString = commandString.substring(0, 1020) + "\n...";
         }
 
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setTitle(`📜 Commands - ${categoryName}`)
           .setColor("#F1C40F")
           .addFields({
             name: `📂 ${categoryName}`,
             value: commandString || "No commands in this category.",
           })
-          .setFooter({
-            text: `Category ${index + 1} of ${
-              sortedCategoryNames.length
-            } | Total Commands: ${commandCount}`,
-            iconURL: interaction.client.user.displayAvatarURL(),
-          })
           .setTimestamp();
+
+        const footerText = `Category ${index + 1} of ${
+          sortedCategoryNames.length
+        } | Total Commands: ${commandCount} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+        setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
+        return embed;
       };
 
       const generateButtons = (index) => {

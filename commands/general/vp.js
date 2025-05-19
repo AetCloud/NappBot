@@ -7,6 +7,10 @@ const {
 } = require("discord.js");
 const { fetchVPThreads } = require("../../utils/fetchVPThreads");
 const { decode } = require("html-entities");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -29,7 +33,7 @@ module.exports = {
       let threadData = getRandomThread();
 
       function createEmbed(thread) {
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setTitle("🧵 Random /vp/ Thread")
           .setDescription(
             decode(thread.comment)
@@ -38,10 +42,16 @@ module.exports = {
           )
           .setColor("#FFCC00")
           .setURL(thread.threadUrl)
-          .setFooter({
-            text: `⭐ Thread ID: ${thread.threadId}`,
-          })
-          .setImage(thread.thumbnail || null);
+          .setImage(thread.thumbnail || null)
+          .setTimestamp();
+
+        const footerText = `⭐ Thread ID: ${thread.threadId} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+        setCustomFooter(
+          embed,
+          footerText,
+          interaction.client.user.displayAvatarURL()
+        );
+        return embed;
       }
 
       function createButtons() {
@@ -79,15 +89,24 @@ module.exports = {
       });
 
       collector.on("end", async () => {
-        await interaction.editReply({ components: [] });
+        await interaction.editReply({ components: [] }).catch(() => {});
       });
     } catch (error) {
       console.error("❌ Error fetching /vp/ threads:", error);
-      await interaction.editReply(
-        "⚠️ An error occurred while retrieving threads. Please try again later."
-      );
+      if (interaction.deferred || interaction.replied) {
+        await interaction
+          .editReply(
+            "⚠️ An error occurred while retrieving threads. Please try again later."
+          )
+          .catch(() => {});
+      } else {
+        await interaction
+          .reply(
+            "⚠️ An error occurred while retrieving threads. Please try again later."
+          )
+          .catch(() => {});
+      }
     }
   },
   modulePath: __filename,
 };
-

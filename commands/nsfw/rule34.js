@@ -6,6 +6,10 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const { fetchRule34Images } = require("../../utils/rule34API");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -22,6 +26,7 @@ module.exports = {
   async execute(interaction) {
     const sender = interaction.user;
     const tags = interaction.options.getString("tags")?.split(" ") || [];
+    const clientUser = interaction.client.user;
 
     await interaction.deferReply();
 
@@ -40,15 +45,16 @@ module.exports = {
     let currentIndex = 0;
 
     function createEmbed(postData) {
-      return new EmbedBuilder()
+      const embed = new EmbedBuilder()
         .setTitle("🔞 Rule34 Image Result")
         .setDescription(`**Tags:** \`${postData.tags.join(", ")}\``)
         .setColor("#E91E63")
         .setImage(postData.imageUrl)
-        .setFooter({
-          text: `⭐ Score: ${postData.score} | 📌 Post ID: ${postData.postId}\nRequested by ${sender.tag}`,
-          iconURL: sender.displayAvatarURL(),
-        });
+        .setTimestamp();
+
+      const footerText = `⭐ Score: ${postData.score} | 📌 Post ID: ${postData.postId}\nRequested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+      setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
+      return embed;
     }
 
     function createRow() {

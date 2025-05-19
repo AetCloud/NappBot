@@ -7,6 +7,7 @@ const {
   EmbedBuilder,
 } = require("discord.js");
 const { getVerificationConfig } = require("../../utils/database");
+const { setDefaultFooter } = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -26,17 +27,26 @@ module.exports = {
     const config = await getVerificationConfig(guildId);
 
     if (!config || !config.enabled) {
+      const errorEmbed = new EmbedBuilder()
+        .setColor("Red")
+        .setDescription(
+          "❌ Age verification is not enabled or configured on this server."
+        );
+      setDefaultFooter(errorEmbed, interaction.client.user);
       return interaction.reply({
-        content:
-          "❌ Age verification is not enabled or configured on this server.",
+        embeds: [errorEmbed],
         ephemeral: true,
       });
     }
 
     const member = interaction.member;
     if (member.roles.cache.has(config.verified_role_id)) {
+      const alreadyVerifiedEmbed = new EmbedBuilder()
+        .setColor("Green")
+        .setDescription("✅ You are already verified on this server.");
+      setDefaultFooter(alreadyVerifiedEmbed, interaction.client.user);
       return interaction.reply({
-        content: "✅ You are already verified on this server.",
+        embeds: [alreadyVerifiedEmbed],
         ephemeral: true,
       });
     }
@@ -69,9 +79,14 @@ module.exports = {
     });
 
     if (components.length === 0) {
+      const noQuestionsEmbed = new EmbedBuilder()
+        .setColor("Red")
+        .setDescription(
+          "❌ This server has verification enabled, but no questions have been configured by the administrators."
+        );
+      setDefaultFooter(noQuestionsEmbed, interaction.client.user);
       return interaction.reply({
-        content:
-          "❌ This server has verification enabled, but no questions have been configured by the administrators.",
+        embeds: [noQuestionsEmbed],
         ephemeral: true,
       });
     }
@@ -82,17 +97,21 @@ module.exports = {
       await interaction.showModal(modal);
     } catch (error) {
       console.error("Failed to show verification modal:", error);
+      const modalErrorEmbed = new EmbedBuilder()
+        .setColor("Red")
+        .setDescription("❌ Could not display the verification form.");
+      setDefaultFooter(modalErrorEmbed, interaction.client.user);
       if (!interaction.replied && !interaction.deferred) {
         await interaction
           .reply({
-            content: "❌ Could not display the verification form.",
+            embeds: [modalErrorEmbed],
             ephemeral: true,
           })
           .catch(() => {});
       } else {
         await interaction
           .followUp({
-            content: "❌ Could not display the verification form.",
+            embeds: [modalErrorEmbed],
             ephemeral: true,
           })
           .catch(() => {});

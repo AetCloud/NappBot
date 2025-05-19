@@ -8,6 +8,10 @@ const {
 const { fetchWalltakerImage } = require("../../utils/fetchWalltaker");
 const { getE621PostId } = require("../../utils/e621API");
 const { database } = require("../../utils/database");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,6 +37,7 @@ module.exports = {
     const guildId = interaction.guild.id;
     let feedId = interaction.options.getString("feed_id");
     let targetChannel = interaction.options.getChannel("channel");
+    const clientUser = interaction.client.user;
 
     try {
       if (!feedId) {
@@ -76,10 +81,10 @@ module.exports = {
         .setTitle(`🖼️ Walltaker Image for Feed ${feedId}`)
         .setImage(imageUrl)
         .setColor("#3498DB")
-        .setFooter({
-          text: `Image changed by: ${lastUpdatedBy} | Requested by ${interaction.user.tag}`,
-          iconURL: interaction.user.displayAvatarURL(),
-        });
+        .setTimestamp();
+
+      const footerText = `Image changed by: ${lastUpdatedBy} | Requested by ${interaction.user.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+      setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
 
       const buttons = [
         new ButtonBuilder()
@@ -113,4 +118,3 @@ module.exports = {
   },
   modulePath: __filename,
 };
-

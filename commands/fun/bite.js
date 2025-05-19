@@ -1,4 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -65,6 +69,14 @@ module.exports = {
       .setImage(customGif || randomGif)
       .setColor("#FF69B4")
       .setTimestamp();
+
+    const footerText = `Requested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+    setCustomFooter(
+      embed,
+      footerText,
+      interaction.client.user.displayAvatarURL()
+    );
+
     await interaction.reply({ embeds: [embed] });
   },
   modulePath: __filename,

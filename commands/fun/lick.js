@@ -1,4 +1,8 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -54,7 +58,6 @@ module.exports = {
       `${sender} gives ${recipient} a sweet little lick! 💖`,
     ];
 
-    // Randomly select a GIF and message
     const randomGif = lickGifs[Math.floor(Math.random() * lickGifs.length)];
     const randomMessage =
       lickMessages[Math.floor(Math.random() * lickMessages.length)];
@@ -69,6 +72,14 @@ module.exports = {
       .setImage(customGif || randomGif)
       .setColor("#FF007F")
       .setTimestamp();
+
+    const footerText = `Requested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+    setCustomFooter(
+      embed,
+      footerText,
+      interaction.client.user.displayAvatarURL()
+    );
+
     await interaction.reply({ embeds: [embed] });
   },
   modulePath: __filename,

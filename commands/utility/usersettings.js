@@ -3,6 +3,10 @@ const {
   getUserPreference,
   setUserPreference,
 } = require("../../utils/database");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -33,6 +37,7 @@ module.exports = {
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
     const userId = interaction.user.id;
+    const clientUser = interaction.client.user;
 
     await interaction.deferReply({ ephemeral: true });
 
@@ -50,10 +55,10 @@ module.exports = {
               : "Not set",
             inline: false,
           })
-          .setFooter({
-            text: `User ID: ${userId}`,
-          })
           .setTimestamp();
+
+        const footerText = `User ID: ${userId} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+        setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
 
         await interaction.editReply({ embeds: [embed], ephemeral: true });
       } else if (subcommand === "set_preference") {

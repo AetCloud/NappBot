@@ -1,5 +1,9 @@
 const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
 const { getUserPreference } = require("../../utils/database");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 const images = {
   female: {
@@ -180,6 +184,13 @@ module.exports = {
         .setColor("#FF007F")
         .setTimestamp();
 
+      const footerText = `Requested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+      setCustomFooter(
+        embed,
+        footerText,
+        interaction.client.user.displayAvatarURL()
+      );
+
       console.log("✅ Sending embed response...");
       await interaction.editReply({ embeds: [embed] });
     } catch (error) {
@@ -189,27 +200,27 @@ module.exports = {
         const content =
           "❌ Something went wrong while processing your request.";
 
-        if (embed) {
-          await interaction.editReply({ content, embeds: [] });
-        } else if (image) {
-          await interaction.editReply({ content });
+        if (interaction.deferred || interaction.replied) {
+          if (embed) {
+            await interaction.editReply({
+              content,
+              embeds: [],
+              components: [],
+            });
+          } else {
+            await interaction.editReply({
+              content,
+              embeds: [],
+              components: [],
+            });
+          }
         } else {
-          await interaction.editReply({ content });
+          await interaction.reply({ content, ephemeral: true });
         }
       } catch (nestedError) {
-        console.error(
-          "⚠️ Interaction was not deferred or already replied to:",
-          nestedError
-        );
-        if (!interaction.replied) {
-          await interaction.reply({
-            content: "❌ An unexpected error occurred.",
-            ephemeral: true,
-          });
-        }
+        console.error("⚠️ Error sending/editing error reply:", nestedError);
       }
     }
   },
   modulePath: __filename,
 };
-

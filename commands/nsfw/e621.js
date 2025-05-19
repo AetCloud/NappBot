@@ -7,6 +7,10 @@ const {
   ComponentType,
 } = require("discord.js");
 const { fetchE621Images, fetchE621User } = require("../../utils/e621API");
+const {
+  setCustomFooter,
+  DEFAULT_BOT_FOOTER_TEXT,
+} = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -17,14 +21,13 @@ module.exports = {
       subcommand
         .setName("search")
         .setDescription("🔞 Search for images on e621.net by tags")
-        .addStringOption(
-          (option) =>
-            option
-              .setName("tags")
-              .setDescription(
-                "Enter search tags separated by spaces (e.g., lucario rating:safe)"
-              )
-              .setRequired(false)
+        .addStringOption((option) =>
+          option
+            .setName("tags")
+            .setDescription(
+              "Enter search tags separated by spaces (e.g., lucario rating:safe)"
+            )
+            .setRequired(false)
         )
     )
     .addSubcommand((subcommand) =>
@@ -42,6 +45,7 @@ module.exports = {
   async execute(interaction) {
     const subcommand = interaction.options.getSubcommand();
     const sender = interaction.user;
+    const clientUser = interaction.client.user;
 
     if (subcommand === "search") {
       const tagsInput = interaction.options.getString("tags");
@@ -76,7 +80,7 @@ module.exports = {
       let currentIndex = 0;
 
       function createSearchEmbed(postData) {
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setTitle("🔞 e621 Image Search Result")
           .setDescription(
             `**Artist(s):** ${
@@ -99,14 +103,15 @@ module.exports = {
               : postData.imageUrl
           )
           .setURL(postData.postUrl)
-          .setFooter({
-            text: `⭐ ${postData.score} | ❤️ ${postData.favCount} | ID: ${
-              postData.postId
-            } | Result ${currentIndex + 1}/${
-              postDataArray.length
-            }\nRequested by ${sender.tag}`,
-            iconURL: sender.displayAvatarURL(),
-          });
+          .setTimestamp();
+
+        const footerText = `⭐ ${postData.score} | ❤️ ${
+          postData.favCount
+        } | ID: ${postData.postId} | Result ${currentIndex + 1}/${
+          postDataArray.length
+        }\nRequested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+        setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
+        return embed;
       }
 
       function createSearchRow(index, total) {
@@ -173,9 +178,7 @@ module.exports = {
           }
         }
       });
-    }
-
-    else if (subcommand === "profile") {
+    } else if (subcommand === "profile") {
       const username = interaction.options.getString("username");
       await interaction.deferReply();
 
@@ -237,7 +240,7 @@ module.exports = {
                 .join("\n")
             : `No recent ${viewType} found.`;
 
-        return new EmbedBuilder()
+        const embed = new EmbedBuilder()
           .setTitle(`📊 e621 User Profile: ${profile.username}`)
           .setURL(`https://e621.net/users/${profile.id}`)
           .setColor("#00549F")
@@ -273,11 +276,11 @@ module.exports = {
               inline: false,
             }
           )
-          .setFooter({
-            text: `Requested by ${sender.tag}`,
-            iconURL: sender.displayAvatarURL(),
-          })
           .setTimestamp();
+
+        const footerText = `Requested by ${sender.tag} | ${DEFAULT_BOT_FOOTER_TEXT}`;
+        setCustomFooter(embed, footerText, clientUser.displayAvatarURL());
+        return embed;
       }
 
       function createProfileRow(viewType) {

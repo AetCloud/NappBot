@@ -6,6 +6,7 @@ const {
   ButtonStyle,
 } = require("discord.js");
 const { getSystemMetrics } = require("../../utils/metrics.js");
+const { setDefaultFooter } = require("../../utils/embedUtils");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -71,7 +72,9 @@ module.exports = {
         }
       )
       .setThumbnail(client.user.displayAvatarURL({ dynamic: true }))
-      .setFooter({ text: "Made with 💚 by n4ppstar" });
+      .setTimestamp();
+
+    setDefaultFooter(embed, client.user);
 
     const buttons = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
