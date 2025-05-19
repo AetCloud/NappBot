@@ -22,6 +22,7 @@ module.exports = {
     .setName("Find Sauce (SauceNAO)")
     .setType(ApplicationCommandType.Message)
     .setDMPermission(false),
+  modulePath: __filename,
 
   async execute(interaction) {
     const commandName = "SauceMessageContext";
@@ -39,10 +40,7 @@ module.exports = {
         process.env.NODE_ENV === "production")
     ) {
       console.error(
-        `[${commandName}] API Key issue. Key present: ${!!SAUCENAO_API_KEY}, Default key in prod: ${
-          SAUCENAO_API_KEY === "a286d02f3476139b8f363ebd89cf1cc25e39072d" &&
-          process.env.NODE_ENV === "production"
-        }`
+        `[${commandName}] API Key issue. Key present: ${!!SAUCENAO_API_KEY}`
       );
       const errorEmbed = createErrorEmbed(
         "Reverse image search is currently unavailable due to a configuration issue.",
@@ -365,5 +363,4 @@ module.exports = {
       console.log(`[${commandName}] Error reply sent.`);
     }
   },
-  modulePath: __filename,
 };
