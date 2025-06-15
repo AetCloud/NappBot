@@ -35,14 +35,20 @@ const loadCommandsRecursive = (dir) => {
       loadCommandsRecursive(fullPath);
     } else if (entry.isFile() && entry.name.endsWith(".js")) {
       try {
-        const command = require(fullPath);
-        if (command.data && command.execute) {
-          command.filePath = fullPath;
-          client.commands.set(command.data.name, command);
-        } else {
-          console.warn(
-            `⚠️ Command file ${entry.name} is missing data or execute.`
-          );
+        const commandOrCommands = require(fullPath);
+        const commandsToProcess = Array.isArray(commandOrCommands)
+          ? commandOrCommands
+          : [commandOrCommands];
+
+        for (const command of commandsToProcess) {
+          if (command.data && command.execute) {
+            command.filePath = fullPath;
+            client.commands.set(command.data.name, command);
+          } else {
+            console.warn(
+              `⚠️ Command file ${entry.name} contains an object that is missing data or execute.`
+            );
+          }
         }
       } catch (error) {
         console.error(`❌ Failed to load command ${entry.name}:`, error);

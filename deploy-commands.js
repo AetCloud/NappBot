@@ -13,14 +13,22 @@ const loadCommands = (dir) => {
       commands = commands.concat(loadCommands(fullPath));
     } else if (entry.isFile() && entry.name.endsWith(".js")) {
       try {
-        const command = require(fullPath);
-        if (command.data && command.execute) {
-          commands.push(command);
-          console.log(`✅ Loaded command file for deployment: ${entry.name}`);
-        } else {
-          console.warn(
-            `⚠️ Command file ${entry.name} is missing data or execute property.`
-          );
+        const commandOrCommands = require(fullPath);
+        const commandsToProcess = Array.isArray(commandOrCommands)
+          ? commandOrCommands
+          : [commandOrCommands];
+
+        for (const command of commandsToProcess) {
+          if (command.data && command.execute) {
+            commands.push(command);
+            console.log(
+              `✅ Loaded command for deployment: ${command.data.name}`
+            );
+          } else {
+            console.warn(
+              `⚠️ Command file ${entry.name} contains an object that is missing a data or execute property.`
+            );
+          }
         }
       } catch (error) {
         console.error(`❌ Failed to load command from ${entry.name}:`, error);
@@ -35,11 +43,15 @@ const deployCommands = async () => {
   const clientId = process.env.CLIENT_ID;
 
   if (!token) {
-    console.error("❌ FATAL: Missing TOKEN environment variable for deployment.");
+    console.error(
+      "❌ FATAL: Missing TOKEN environment variable for deployment."
+    );
     process.exit(1);
   }
   if (!clientId) {
-    console.error("❌ FATAL: Missing CLIENT_ID environment variable for deployment.");
+    console.error(
+      "❌ FATAL: Missing CLIENT_ID environment variable for deployment."
+    );
     process.exit(1);
   }
 
@@ -47,10 +59,10 @@ const deployCommands = async () => {
   const rest = new REST({ version: "10" }).setToken(token);
 
   const commandsDir = path.join(__dirname, "commands");
-   if (!fs.existsSync(commandsDir)) {
-       console.error(`❌ Commands directory not found at: ${commandsDir}`);
-       process.exit(1);
-   }
+  if (!fs.existsSync(commandsDir)) {
+    console.error(`❌ Commands directory not found at: ${commandsDir}`);
+    process.exit(1);
+  }
 
   const loadedCommands = loadCommands(commandsDir);
   const commandData = loadedCommands.map((cmd) => cmd.data.toJSON());
@@ -74,13 +86,12 @@ const deployCommands = async () => {
     console.log(`🎉 Successfully deployed ${data.length} global commands.`);
     console.log("✅ Deployment script finished successfully. Forcing exit.");
     process.exit(0);
-
   } catch (error) {
     console.error("❌ Deployment process failed:", error.message || error);
-    if(error.rawError) {
-        console.error("--- Discord API Error Details ---");
-        console.error(JSON.stringify(error.rawError, null, 2));
-        console.error("-------------------------------");
+    if (error.rawError) {
+      console.error("--- Discord API Error Details ---");
+      console.error(JSON.stringify(error.rawError, null, 2));
+      console.error("-------------------------------");
     }
     console.error("❗ Forcing exit due to deployment error.");
     process.exit(1);
@@ -89,4 +100,6 @@ const deployCommands = async () => {
 
 deployCommands();
 
-console.log("deployCommands() function called. Script execution should end via process.exit().");
+console.log(
+  "deployCommands() function called. Script execution should end via process.exit()."
+);
