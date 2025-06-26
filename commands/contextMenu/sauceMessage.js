@@ -4,6 +4,7 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
+  InteractionContextType,
 } = require("discord.js");
 const { searchSauceNaoByUrl } = require("../../utils/saucenaoAPI.js");
 const {
@@ -188,7 +189,11 @@ const publicCommand = {
   data: new ContextMenuCommandBuilder()
     .setName("Find Sauce (Public)")
     .setType(ApplicationCommandType.Message)
-    .setDMPermission(false),
+    .setContexts([
+      InteractionContextType.Guild,
+      InteractionContextType.BotDM,
+      InteractionContextType.PrivateChannel,
+    ]),
   async execute(interaction) {
     await executeSauceFinder(interaction, false);
   },
@@ -198,9 +203,14 @@ const ephemeralCommand = {
   data: new ContextMenuCommandBuilder()
     .setName("Find Sauce (Ephemeral)")
     .setType(ApplicationCommandType.Message)
-    .setDMPermission(false),
+    .setContexts([
+      InteractionContextType.Guild,
+      InteractionContextType.BotDM,
+      InteractionContextType.PrivateChannel,
+    ]),
   async execute(interaction) {
     await executeSauceFinder(interaction, true);
+    T;
   },
 };
 
