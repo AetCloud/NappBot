@@ -78,6 +78,7 @@ module.exports = {
     };
 
     const generateButtons = (index) => {
+      const emoji = emojis[index];
       const isSingleEmoji = emojis.length <= 1;
       return new ActionRowBuilder().addComponents(
         new ButtonBuilder()
@@ -89,7 +90,11 @@ module.exports = {
           .setCustomId("next_emoji")
           .setLabel("Next ➡️")
           .setStyle(ButtonStyle.Primary)
-          .setDisabled(isSingleEmoji || index === emojis.length - 1)
+          .setDisabled(isSingleEmoji || index === emojis.length - 1),
+        new ButtonBuilder()
+          .setLabel("Download")
+          .setStyle(ButtonStyle.Link)
+          .setURL(emoji.url)
       );
     };
 
@@ -122,6 +127,11 @@ module.exports = {
         const finalEmbed = generateEmbed(currentIndex);
         const finalButtons = generateButtons(currentIndex);
         finalButtons.components.forEach((button) => button.setDisabled(true));
+        const downloadButton = finalButtons.components.find(
+          (c) => c.data.style === ButtonStyle.Link
+        );
+        if (downloadButton) downloadButton.setDisabled(false);
+
         await interaction.editReply({
           embeds: [finalEmbed],
           components: [finalButtons],
